@@ -299,6 +299,8 @@ function collectForm(existing, rating) {
     notes: document.getElementById('f-notes')?.value?.trim() || '',
     image_url: existing?.image_url || '',
     created_at: existing?.created_at || new Date().toISOString(),
+    ingredients_de: existing?.ingredients_de || [],
+    steps_de: existing?.steps_de || [],    
   };
 }
 
