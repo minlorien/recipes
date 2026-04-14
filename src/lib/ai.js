@@ -50,9 +50,21 @@ Return this exact structure:
       "notes": "optional prep note e.g. chopped"
     }
   ],
+  "ingredients_de": [
+    {
+      "name": "Zutatenname auf Deutsch",
+      "amount": 250,
+      "unit": "g",
+      "notes": "optionale Zubereitungsnotiz auf Deutsch"
+    }
+  ],
   "steps": [
-    "Step 1 text",
-    "Step 2 text"
+    "Step 1 text in English",
+    "Step 2 text in English"
+  ],
+  "steps_de": [
+    "Schritt 1 auf Deutsch",
+    "Schritt 2 auf Deutsch"
   ]
 }
 
