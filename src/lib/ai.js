@@ -193,3 +193,30 @@ When referring to a specific recipe from the collection, wrap its title in [[dou
 
   return callClaude(messages, system, 600);
 }
+
+// ── Translate recipe content ───────────────────────────────────────────────
+export async function translateRecipeContent(recipe, targetLang) {
+  if (targetLang === 'en') return null; // English is always the stored version
+
+  const system = 'You are a recipe translation assistant. Return ONLY valid JSON, no markdown.';
+  const prompt = `Translate the following recipe ingredients and steps to ${targetLang === 'de' ? 'German' : 'English'}.
+Keep ingredient names natural and idiomatic (e.g. use common German cooking terms).
+Keep amounts and units unchanged.
+
+Ingredients:
+${JSON.stringify(recipe.ingredients)}
+
+Steps:
+${JSON.stringify(recipe.steps)}
+
+Return JSON:
+{
+  "ingredients": [{ "name": "translated name", "amount": same, "unit": same, "notes": "translated notes" }],
+  "steps": ["translated step 1", "translated step 2"]
+}`;
+
+  const text = await callClaude([{ role: 'user', content: prompt }], system, 2000);
+  const clean = text.replace(/```json\n?|\n?```/g, '').trim();
+  const jsonMatch = clean.match(/\{[\s\S]*\}/);
+  return JSON.parse(jsonMatch ? jsonMatch[0] : clean);
+}

@@ -1,7 +1,10 @@
 import { state } from '../lib/state.js';
 import { starsHTML, categoryEmoji, formatTime, icons, toast, shareRecipeText } from '../lib/ui.js';
 import { formatAmount } from '../lib/units.js';
-import { getSuggestions } from '../lib/ai.js';
+import { getSuggestions, translateRecipeContent } from '../lib/ai.js';
+
+// Cache translations so we don't call the API repeatedly
+const translationCache = {};
 
 export function renderDetailPage(container) {
   const recipe = state.currentRecipe;
@@ -65,34 +68,12 @@ export function renderDetailPage(container) {
           </button>
         </div>
 
-        <!-- Ingredients -->
-        <div class="detail-section">
-          <h3>Ingredients</h3>
-          <ul class="ingredient-list">
-            ${recipe.ingredients.map(ing => {
-              const scaled = ing.amount ? ing.amount * scale : 0;
-              const { metric, imperial } = formatAmount(scaled, ing.unit);
-              return `
-                <li>
-                  <span class="ing-name">${ing.name}${ing.notes ? `<span class="text-muted text-sm"> — ${ing.notes}</span>` : ''}</span>
-                  ${scaled ? `
-                    <span style="text-align:right;">
-                      <span class="ing-amount">${metric}</span>
-                      ${imperial ? `<span class="ing-amount-imperial"> / ${imperial}</span>` : ''}
-                    </span>
-                  ` : '<span class="text-muted text-sm">to taste</span>'}
-                </li>
-              `;
-            }).join('')}
-          </ul>
+        <!-- Ingredients & Steps (may be translated) -->
+        <div id="ingredients-section">
+          ${renderIngredients(recipe.ingredients, scale)}
         </div>
-
-        <!-- Steps -->
-        <div class="detail-section">
-          <h3>Method</h3>
-          <ol class="steps-list">
-            ${recipe.steps.map(step => `<li><span>${step}</span></li>`).join('')}
-          </ol>
+        <div id="steps-section">
+          ${renderSteps(recipe.steps)}
         </div>
 
         ${recipe.notes ? `
@@ -144,6 +125,76 @@ export function renderDetailPage(container) {
 
   // Load AI suggestions quietly
   loadSuggestions(recipe);
+
+  // Load translation if German is selected
+  loadTranslation(recipe, scale);
+}
+
+function renderIngredients(ingredients, scale) {
+  return `
+    <div class="detail-section">
+      <h3>Ingredients</h3>
+      <ul class="ingredient-list">
+        ${ingredients.map(ing => {
+          const scaled = ing.amount ? ing.amount * scale : 0;
+          const { metric, imperial } = formatAmount(scaled, ing.unit);
+          return `
+            <li>
+              <span class="ing-name">${ing.name}${ing.notes ? `<span class="text-muted text-sm"> — ${ing.notes}</span>` : ''}</span>
+              ${scaled ? `
+                <span style="text-align:right;">
+                  <span class="ing-amount">${metric}</span>
+                  ${imperial ? `<span class="ing-amount-imperial"> / ${imperial}</span>` : ''}
+                </span>
+              ` : '<span class="text-muted text-sm">to taste</span>'}
+            </li>
+          `;
+        }).join('')}
+      </ul>
+    </div>
+  `;
+}
+
+function renderSteps(steps) {
+  return `
+    <div class="detail-section">
+      <h3>Method</h3>
+      <ol class="steps-list">
+        ${steps.map(step => `<li><span>${step}</span></li>`).join('')}
+      </ol>
+    </div>
+  `;
+}
+
+async function loadTranslation(recipe, scale) {
+  const lang = state.get('displayLang');
+  if (lang === 'en') return; // already in English
+
+  const cacheKey = recipe.id + '_de';
+
+  // Show loading state
+  const ingsEl = document.getElementById('ingredients-section');
+  const stepsEl = document.getElementById('steps-section');
+  if (!ingsEl || !stepsEl) return;
+
+  if (!translationCache[cacheKey]) {
+    ingsEl.style.opacity = '0.5';
+    stepsEl.style.opacity = '0.5';
+    try {
+      const translated = await translateRecipeContent(recipe, lang);
+      if (translated) translationCache[cacheKey] = translated;
+    } catch (e) {
+      // Silently fall back to English
+    }
+    ingsEl.style.opacity = '1';
+    stepsEl.style.opacity = '1';
+  }
+
+  const translation = translationCache[cacheKey];
+  if (!translation) return;
+
+  if (ingsEl) ingsEl.innerHTML = renderIngredients(translation.ingredients || recipe.ingredients, scale);
+  if (stepsEl) stepsEl.innerHTML = renderSteps(translation.steps || recipe.steps);
 }
 
 async function loadSuggestions(recipe) {
