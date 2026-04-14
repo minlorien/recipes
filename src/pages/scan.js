@@ -5,6 +5,47 @@ import { appendRecipe, updateRecipe } from '../lib/sheets.js';
 
 const CATEGORIES = ['Breakfast','Soup','Salad','Main','Side','Dessert','Baking','Drink','Snack','Preserve'];
 
+export async function checkSharedImage() {
+  if ('launchQueue' in window) {
+    window.launchQueue.setConsumer(async (launchParams) => {
+      if (!launchParams.files?.length) return;
+      const file = await launchParams.files[0].getFile();
+      if (file.type.startsWith('image/')) {
+        const { state } = await import('../lib/state.js');
+        state.navigate('scan');
+        setTimeout(() => handleSharedFile(file), 300);
+      }
+    });
+  }
+}
+
+async function handleSharedFile(file) {
+  const zone = document.getElementById('upload-zone');
+  const processing = document.getElementById('processing');
+  const manualBtn = document.getElementById('manual-btn');
+  if (!zone || !processing) return;
+
+  zone.classList.add('hidden');
+  if (manualBtn) manualBtn.classList.add('hidden');
+  processing.classList.remove('hidden');
+
+  try {
+    const { fileToBase64 } = await import('../lib/ui.js');
+    const { extractRecipeFromImage } = await import('../lib/ai.js');
+    const base64 = await fileToBase64(file);
+    const recipe = await extractRecipeFromImage(base64, file.type);
+    recipe.id = crypto.randomUUID();
+    processing.classList.add('hidden');
+    const container = document.getElementById('page-content');
+    showRecipeForm(recipe, container);
+  } catch (err) {
+    if (processing) processing.classList.add('hidden');
+    if (zone) zone.classList.remove('hidden');
+    const { toast } = await import('../lib/ui.js');
+    toast('Could not read recipe: ' + err.message, 'error');
+  }
+}
+
 export function renderScanPage(container) {
   container.innerHTML = `
     <div class="page">

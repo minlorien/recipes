@@ -2,7 +2,7 @@ import { state, checkAuth, login, logout, loadRecipes } from './lib/state.js';
 import { icons, toast } from './lib/ui.js';
 import { renderRecipesPage } from './pages/recipes.js';
 import { renderDetailPage } from './pages/detail.js';
-import { renderScanPage } from './pages/scan.js';
+import { renderScanPage, checkSharedImage } from './pages/scan.js';
 import { renderShoppingPage } from './pages/shopping.js';
 import { renderChatPage } from './pages/chat.js';
 
@@ -135,3 +135,4 @@ if (checkAuth()) {
 
 state.subscribe(() => render());
 render();
+checkSharedImage();
