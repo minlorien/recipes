@@ -106,9 +106,6 @@ Do not confuse visually similar letters in handwriting (e.g. K vs W, H vs B, u v
   if (jsonMatch) clean = jsonMatch[0];
   try {
     const parsed = JSON.parse(clean);
-    console.log('AI returned fields:', Object.keys(parsed));
-    console.log('ingredients_de:', parsed.ingredients_de ? parsed.ingredients_de.length + ' items' : 'MISSING');
-    console.log('steps_de:', parsed.steps_de ? parsed.steps_de.length + ' items' : 'MISSING');
     return parsed;
   } catch (e) {
     console.error('Failed to parse AI response:', clean);

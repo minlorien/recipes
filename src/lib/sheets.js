@@ -105,12 +105,8 @@ export async function fetchRecipes() {
 
 // ── Write (uses service account OAuth) ────────────────────────────────────
 export async function appendRecipe(recipe) {
-  console.log('Saving recipe, ingredients_de:', recipe.ingredients_de?.length, 'steps_de:', recipe.steps_de?.length);
-  console.log('Row length will be:', recipeToRow(recipe).length);
   const token = await getAccessToken();
   const row = recipeToRow(recipe);
-  console.log('Row[16] ingredients_de:', row[16]);
-  console.log('Row[17] steps_de:', row[17]);
   const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
   const res = await fetch(url, {
     method: 'POST',
