@@ -62,13 +62,25 @@ Important rules:
 - For uncountable items (e.g. "salt to taste"), use amount: 0 and unit: "".
 - For items measured in pieces (eggs, cloves), use unit: "pcs".
 - Infer category from the recipe type.
-- Tags should be descriptive: e.g. vegetarian, quick, family-favourite, Christmas, etc.`;
+- Tags should be descriptive: e.g. vegetarian, quick, family-favourite, Christmas, etc.
+- The image may be rotated — always orient it correctly before reading.
+- For handwritten recipes, read each word carefully. The title is the most important field to get right.
+- If a letter-grade rating is visible (e.g. A, B+, A-) in the image, convert it to stars: A=5, B+=4, B=3, C=2.
+- The image may be rotated — always orient it correctly before reading.
+- For handwritten recipes, read each word carefully. The title is the most important field to get right.
+- If a letter-grade rating is visible (e.g. A, B+, A-) in the image, convert it: A=5, B+=4, B=3, C=2.`;
 
   const text = await callClaude([{
     role: 'user',
     content: [
       { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64Image } },
-      { type: 'text', text: 'Extract this recipe into JSON format.' }
+      { type: 'text', text: `Extract this recipe into JSON format.
+
+Important: The image may be rotated (sideways or upside down) — mentally rotate it to read correctly before extracting.
+This may be a handwritten recipe in German or English. Read handwriting carefully character by character.
+The recipe title is usually the largest or most prominent text. Double-check you are reading it correctly.
+German words to watch for: Kalter=Cold, Hund=Dog, Kuchen=Cake, Brot=Bread, Torte=Tart, Suppe=Soup, Salat=Salad.
+Do not confuse visually similar letters in handwriting (e.g. K vs W, H vs B, u vs n).` }
     ]
   }], system, 3000);
 
