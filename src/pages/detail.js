@@ -22,10 +22,15 @@ export function renderDetailPage(container) {
 
       <div class="recipe-detail">
         <div class="detail-header">
-          ${recipe.language === 'de' && recipe.title_de ? `
-            <p class="text-sm text-muted mb-8" style="font-style:italic;">${recipe.title_de}</p>
-          ` : ''}
-          <h1>${recipe.title}</h1>
+          ${(() => {
+            const lang = state.get('displayLang');
+            const primary = lang === 'de' && recipe.title_de ? recipe.title_de : recipe.title;
+            const secondary = lang === 'de' && recipe.title_de ? recipe.title : (recipe.title_de || '');
+            return `
+              ${secondary ? `<p class="text-sm text-muted mb-8" style="font-style:italic;">${secondary}</p>` : ''}
+              <h1>${primary}</h1>
+            `;
+          })()}
           <div class="detail-meta mt-12">
             ${recipe.category ? `<span class="tag tag-green">${categoryEmoji(recipe.category)} ${recipe.category}</span>` : ''}
             ${recipe.prep_mins ? `<span>Prep: ${formatTime(recipe.prep_mins)}</span>` : ''}

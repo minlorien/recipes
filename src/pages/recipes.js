@@ -121,6 +121,8 @@ export function renderRecipesPage(container) {
 }
 
 function recipeCardHTML(r) {
+  const lang = state.get('displayLang');
+  const title = lang === 'de' && r.title_de ? r.title_de : r.title;
   const inShopping = state.get('shoppingList').includes(r.id);
   const totalTime = (r.prep_mins || 0) + (r.cook_mins || 0);
   return `
@@ -134,7 +136,7 @@ function recipeCardHTML(r) {
         ${inShopping ? `<span class="card-lang" style="left:10px;right:auto;background:var(--forest);color:#fff;">🛒</span>` : ''}
       </div>
       <div class="card-body">
-        <div class="card-title">${r.title}</div>
+        <div class="card-title">${title}</div>
         <div class="card-meta">
           ${r.category ? `<span class="tag tag-green">${r.category}</span>` : ''}
           ${totalTime ? `<span>${formatTime(totalTime)}</span>` : ''}

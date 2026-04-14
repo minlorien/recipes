@@ -34,6 +34,9 @@ function render() {
         ${page === 'detail' || page === 'scan' ? '' : `
           <button class="btn btn-ghost btn-sm" id="refresh-btn" title="Refresh">${icons.refresh}</button>
         `}
+        <button class="btn btn-outline btn-sm" id="lang-btn" title="Toggle language" style="font-weight:500;min-width:36px;">
+          ${state.get('displayLang') === 'en' ? 'DE' : 'EN'}
+        </button>
         <button class="btn btn-ghost btn-sm" id="logout-btn" title="Sign out" style="font-size:1.1rem;">⎋</button>
       </div>
     </nav>
@@ -66,6 +69,10 @@ function render() {
   app.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => state.navigate(btn.dataset.page));
   });
+  app.querySelector('#lang-btn')?.addEventListener('click', () => {
+    state.toggleLang();
+  });
+
   app.querySelector('#logout-btn')?.addEventListener('click', () => {
     if (window.confirm('Sign out?')) logout();
   });

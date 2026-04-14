@@ -13,6 +13,7 @@ class State {
       searchQuery: '',
       filterCategory: '',
       filterRating: 0,
+      displayLang: localStorage.getItem('displayLang') || 'en',
       shoppingList: JSON.parse(localStorage.getItem('shoppingList') || '[]'),
       shoppingServings: JSON.parse(localStorage.getItem('shoppingServings') || '{}'),
     };
@@ -85,6 +86,13 @@ class State {
     return this._data.shoppingList
       .map(id => this._data.recipes.find(r => r.id === id))
       .filter(Boolean);
+  }
+
+  toggleLang() {
+    const next = this._data.displayLang === 'en' ? 'de' : 'en';
+    this._data.displayLang = next;
+    localStorage.setItem('displayLang', next);
+    this._notify();
   }
 
   navigate(page, recipeId = null) {
