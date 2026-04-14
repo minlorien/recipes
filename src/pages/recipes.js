@@ -73,9 +73,15 @@ export function renderRecipesPage(container) {
   `;
 
   // Events
-  document.getElementById('search-input')?.addEventListener('input', e => {
-    state.set({ searchQuery: e.target.value });
-    updateGrid();
+  const searchInput = document.getElementById('search-input');
+  let searchDebounce = null;
+  searchInput?.addEventListener('input', e => {
+    const val = e.target.value;
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+      state._data.searchQuery = val;
+      updateGrid();
+    }, 150);
   });
 
   document.getElementById('filter-row')?.addEventListener('click', e => {
