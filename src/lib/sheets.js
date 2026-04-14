@@ -2,11 +2,6 @@ import { CONFIG } from '../config.js';
 
 const BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 
-// Column layout in the sheet (1-indexed, but we use 0-indexed arrays)
-// A: id | B: title | C: title_de | D: category | E: servings | F: prep_mins
-// G: cook_mins | H: rating | I: language | J: tags | K: ingredients_json
-// L: steps_json | M: notes | N: image_url | O: created_at | P: updated_at
-
 export const COLUMNS = ['id','title','title_de','category','servings','prep_mins',
   'cook_mins','rating','language','tags','ingredients','steps','notes','image_url',
   'created_at','updated_at'];
@@ -45,6 +40,57 @@ function recipeToRow(recipe) {
   ];
 }
 
+// ── Google Service Account OAuth token ────────────────────────────────────
+let _cachedToken = null;
+let _tokenExpiry = 0;
+
+async function getAccessToken() {
+  if (_cachedToken && Date.now() < _tokenExpiry) return _cachedToken;
+
+  const sa = JSON.parse(CONFIG.GOOGLE_SERVICE_ACCOUNT_JSON);
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const claim = {
+    iss: sa.client_email,
+    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now,
+  };
+
+  const encode = obj => btoa(JSON.stringify(obj)).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+  const unsigned = `${encode(header)}.${encode(claim)}`;
+
+  // Import private key
+  const pemContents = sa.private_key.replace(/-----BEGIN RSA PRIVATE KEY-----/g,'').replace(/-----END RSA PRIVATE KEY-----/g,'').replace(/-----BEGIN PRIVATE KEY-----/g,'').replace(/-----END PRIVATE KEY-----/g,'').replace(/\s/g,'');
+  const keyData = Uint8Array.from(atob(pemContents), c => c.charCodeAt(0));
+  const cryptoKey = await crypto.subtle.importKey(
+    'pkcs8', keyData.buffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false, ['sign']
+  );
+
+  // Sign
+  const encoder = new TextEncoder();
+  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', cryptoKey, encoder.encode(unsigned));
+  const sig = btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+  const jwt = `${unsigned}.${sig}`;
+
+  // Exchange for access token
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+  });
+  const data = await res.json();
+  if (!data.access_token) throw new Error('Failed to get access token: ' + JSON.stringify(data));
+
+  _cachedToken = data.access_token;
+  _tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+  return _cachedToken;
+}
+
+// ── Read (uses API key — public read) ─────────────────────────────────────
 export async function fetchRecipes() {
   const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A2:P?key=${CONFIG.SHEETS_API_KEY}`;
   const res = await fetch(url);
@@ -53,26 +99,37 @@ export async function fetchRecipes() {
   return (data.values || []).map(rowToRecipe).filter(r => r.id);
 }
 
+// ── Write (uses service account OAuth) ────────────────────────────────────
 export async function appendRecipe(recipe) {
+  const token = await getAccessToken();
   const row = recipeToRow(recipe);
-  const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A:P:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS&key=${CONFIG.SHEETS_API_KEY}`;
+  const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A:P:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
     body: JSON.stringify({ values: [row] }),
   });
-  if (!res.ok) throw new Error('Failed to save recipe');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error('Failed to save recipe: ' + (err.error?.message || res.status));
+  }
   return recipe;
 }
 
 export async function updateRecipe(recipe, rowIndex) {
-  // rowIndex is 1-indexed (row 1 = header, row 2 = first recipe)
+  const token = await getAccessToken();
   const row = recipeToRow(recipe);
   const range = `${CONFIG.SHEET_NAME}!A${rowIndex}:P${rowIndex}`;
-  const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${range}?valueInputOption=RAW&key=${CONFIG.SHEETS_API_KEY}`;
+  const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${range}?valueInputOption=RAW`;
   const res = await fetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
     body: JSON.stringify({ values: [row] }),
   });
   if (!res.ok) throw new Error('Failed to update recipe');
@@ -80,12 +137,15 @@ export async function updateRecipe(recipe, rowIndex) {
 }
 
 export async function deleteRecipe(rowIndex) {
-  // Uses Sheets batchUpdate to delete a row
-  const url = `${BASE}/${CONFIG.SHEETS_ID}:batchUpdate?key=${CONFIG.SHEETS_API_KEY}`;
-  const sheetId = 0; // assumes first sheet tab
+  const token = await getAccessToken();
+  const url = `${BASE}/${CONFIG.SHEETS_ID}:batchUpdate`;
+  const sheetId = 0;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
     body: JSON.stringify({
       requests: [{
         deleteDimension: {
@@ -102,11 +162,14 @@ export async function ensureHeaderRow() {
   const res = await fetch(url);
   const data = await res.json();
   if (!data.values || !data.values[0] || data.values[0][0] !== 'id') {
-    // Write header
-    const writeUrl = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A1:P1?valueInputOption=RAW&key=${CONFIG.SHEETS_API_KEY}`;
+    const token = await getAccessToken();
+    const writeUrl = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A1:P1?valueInputOption=RAW`;
     await fetch(writeUrl, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
       body: JSON.stringify({ values: [COLUMNS] }),
     });
   }
