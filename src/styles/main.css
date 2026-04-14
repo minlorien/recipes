@@ -206,7 +206,7 @@ label { font-size: 0.82rem; font-weight: 500; color: var(--ink-muted); display: 
 .ingredient-list li:last-child { border-bottom: none; }
 .ingredient-list .ing-name { flex: 1; }
 .ingredient-list .ing-amount { font-weight: 500; color: var(--forest); text-align: right; }
-.ingredient-list .ing-amount-imperial { font-size: 0.8rem; color: var(--ink-faint); text-align: right; }
+.ingredient-list .ing-amount-imperial { font-size: 0.85rem; color: var(--ink-faint); text-align: right; font-weight: 400; }
 
 /* ── Steps ── */
 .steps-list { list-style: none; counter-reset: steps; }

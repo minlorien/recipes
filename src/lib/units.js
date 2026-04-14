@@ -3,16 +3,23 @@
 
 const CONVERSIONS = {
   // Volume
-  ml:   { to: 'fl oz', factor: 0.033814, threshold: 240,  above: { from: 'ml', to: 'cups', factor: 0.00422675 } },
-  l:    { to: 'qt',    factor: 1.05669 },
+  ml:    { to: 'fl oz', factor: 0.033814, threshold: 240, above: { from: 'ml', to: 'cups', factor: 0.00422675 } },
+  l:     { to: 'qt',   factor: 1.05669 },
+  // Cooking volume (already imperial-ish, show ml equivalent)
+  tsp:   { to: 'ml',   factor: 4.92892 },
+  tbsp:  { to: 'ml',   factor: 14.7868 },
+  cup:   { to: 'ml',   factor: 236.588 },
   // Weight
-  g:    { to: 'oz',   factor: 0.035274, threshold: 500, above: { from: 'g', to: 'lb', factor: 0.00220462 } },
-  kg:   { to: 'lb',   factor: 2.20462 },
+  g:     { to: 'oz',   factor: 0.035274, threshold: 500, above: { from: 'g', to: 'lb', factor: 0.00220462 } },
+  kg:    { to: 'lb',   factor: 2.20462 },
+  oz:    { to: 'g',    factor: 28.3495 },
+  lb:    { to: 'g',    factor: 453.592 },
   // Temperature
-  '°C': { to: '°F',   convert: (c) => Math.round(c * 9/5 + 32) },
+  '°c':  { to: '°F',   convert: (c) => Math.round(c * 9/5 + 32) },
+  '°C':  { to: '°F',   convert: (c) => Math.round(c * 9/5 + 32) },
   // Length
-  cm:   { to: 'in',   factor: 0.393701 },
-  mm:   { to: 'in',   factor: 0.0393701 },
+  cm:    { to: 'in',   factor: 0.393701 },
+  mm:    { to: 'in',   factor: 0.0393701 },
 };
 
 // Volume fractions for nice display

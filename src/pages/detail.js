@@ -71,9 +71,9 @@ export function renderDetailPage(container) {
                 <li>
                   <span class="ing-name">${ing.name}${ing.notes ? `<span class="text-muted text-sm"> — ${ing.notes}</span>` : ''}</span>
                   ${scaled ? `
-                    <span>
+                    <span style="text-align:right;">
                       <span class="ing-amount">${metric}</span>
-                      ${imperial ? `<br><span class="ing-amount-imperial">${imperial}</span>` : ''}
+                      ${imperial ? `<span class="ing-amount-imperial"> / ${imperial}</span>` : ''}
                     </span>
                   ` : '<span class="text-muted text-sm">to taste</span>'}
                 </li>
