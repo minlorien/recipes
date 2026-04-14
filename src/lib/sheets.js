@@ -111,8 +111,6 @@ export async function appendRecipe(recipe) {
   const row = recipeToRow(recipe);
   console.log('Row[16] ingredients_de:', row[16]);
   console.log('Row[17] steps_de:', row[17]);
-  const token = await getAccessToken();
-  const row = recipeToRow(recipe);
   const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
   const res = await fetch(url, {
     method: 'POST',
