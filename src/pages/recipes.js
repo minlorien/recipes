@@ -64,7 +64,7 @@ export function renderRecipesPage(container) {
           ${!q && !cat && !rating ? `<button class="btn btn-primary" id="scan-first-btn">${icons.scan} Scan a Recipe</button>` : ''}
         </div>
       ` : `
-        <p class="text-muted text-sm mb-12">${recipes.length} recipe${recipes.length !== 1 ? 's' : ''}</p>
+        <p class="text-muted text-sm mb-12 recipe-count">${recipes.length} recipe${recipes.length !== 1 ? 's' : ''}</p>
         <div class="recipe-grid">
           ${recipes.map(r => recipeCardHTML(r)).join('')}
         </div>
@@ -74,14 +74,9 @@ export function renderRecipesPage(container) {
 
   // Events
   const searchInput = document.getElementById('search-input');
-  let searchDebounce = null;
   searchInput?.addEventListener('input', e => {
-    const val = e.target.value;
-    clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(() => {
-      state._data.searchQuery = val;
-      updateGrid();
-    }, 150);
+    const q = e.target.value.toLowerCase().trim();
+    filterCards(q);
   });
 
   document.getElementById('filter-row')?.addEventListener('click', e => {
@@ -99,38 +94,17 @@ export function renderRecipesPage(container) {
     });
   });
 
-  function updateGrid() {
-    const recipes = state.filteredRecipes;
-    const grid = container.querySelector('.recipe-grid');
-    const empty = container.querySelector('.empty-state');
-    const count = container.querySelector('.text-muted.text-sm.mb-12');
-    const q = state.get('searchQuery');
-    const cat = state.get('filterCategory');
-    const rating = state.get('filterRating');
-
-    if (grid) {
-      if (recipes.length === 0) {
-        grid.innerHTML = '';
-        if (!empty) {
-          grid.insertAdjacentHTML('afterend', `
-            <div class="empty-state">
-              <div class="empty-icon">📖</div>
-              <h2>${q || cat || rating ? 'No matches found' : 'No recipes yet'}</h2>
-              <p>${q || cat || rating ? 'Try a different search or filter.' : 'Add your first recipe by scanning a photo or entering manually.'}</p>
-            </div>
-          `);
-        }
-      } else {
-        container.querySelector('.empty-state')?.remove();
-        grid.innerHTML = recipes.map(r => recipeCardHTML(r)).join('');
-        if (count) count.textContent = recipes.length + ' recipe' + (recipes.length !== 1 ? 's' : '');
-        grid.querySelectorAll('.recipe-card').forEach(card => {
-          card.addEventListener('click', () => state.navigate('detail', card.dataset.id));
-        });
-      }
-    } else {
-      renderRecipesPage(container);
-    }
+  function filterCards(q) {
+    const cards = container.querySelectorAll('.recipe-card');
+    let visible = 0;
+    cards.forEach(card => {
+      const text = card.textContent.toLowerCase();
+      const show = !q || text.includes(q);
+      card.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    const count = container.querySelector('.recipe-count');
+    if (count) count.textContent = visible + ' recipe' + (visible !== 1 ? 's' : '');
   }
 
   container.querySelector('#add-recipe-btn')?.addEventListener('click', () => state.navigate('scan'));
