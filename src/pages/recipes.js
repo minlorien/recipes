@@ -75,7 +75,7 @@ export function renderRecipesPage(container) {
   // Events
   document.getElementById('search-input')?.addEventListener('input', e => {
     state.set({ searchQuery: e.target.value });
-    renderRecipesPage(container);
+    updateGrid();
   });
 
   document.getElementById('filter-row')?.addEventListener('click', e => {
@@ -92,6 +92,40 @@ export function renderRecipesPage(container) {
       renderRecipesPage(container);
     });
   });
+
+  function updateGrid() {
+    const recipes = state.filteredRecipes;
+    const grid = container.querySelector('.recipe-grid');
+    const empty = container.querySelector('.empty-state');
+    const count = container.querySelector('.text-muted.text-sm.mb-12');
+    const q = state.get('searchQuery');
+    const cat = state.get('filterCategory');
+    const rating = state.get('filterRating');
+
+    if (grid) {
+      if (recipes.length === 0) {
+        grid.innerHTML = '';
+        if (!empty) {
+          grid.insertAdjacentHTML('afterend', `
+            <div class="empty-state">
+              <div class="empty-icon">📖</div>
+              <h2>${q || cat || rating ? 'No matches found' : 'No recipes yet'}</h2>
+              <p>${q || cat || rating ? 'Try a different search or filter.' : 'Add your first recipe by scanning a photo or entering manually.'}</p>
+            </div>
+          `);
+        }
+      } else {
+        container.querySelector('.empty-state')?.remove();
+        grid.innerHTML = recipes.map(r => recipeCardHTML(r)).join('');
+        if (count) count.textContent = recipes.length + ' recipe' + (recipes.length !== 1 ? 's' : '');
+        grid.querySelectorAll('.recipe-card').forEach(card => {
+          card.addEventListener('click', () => state.navigate('detail', card.dataset.id));
+        });
+      }
+    } else {
+      renderRecipesPage(container);
+    }
+  }
 
   container.querySelector('#add-recipe-btn')?.addEventListener('click', () => state.navigate('scan'));
   container.querySelector('#scan-first-btn')?.addEventListener('click', () => state.navigate('scan'));
