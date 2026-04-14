@@ -4,13 +4,15 @@ const BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 
 export const COLUMNS = ['id','title','title_de','category','servings','prep_mins',
   'cook_mins','rating','language','tags','ingredients','steps','notes','image_url',
-  'created_at','updated_at'];
+  'created_at','updated_at','ingredients_de','steps_de'];
 
 function rowToRecipe(row) {
   const r = {};
   COLUMNS.forEach((col, i) => r[col] = row[i] || '');
   try { r.ingredients = JSON.parse(r.ingredients || '[]'); } catch { r.ingredients = []; }
   try { r.steps = JSON.parse(r.steps || '[]'); } catch { r.steps = []; }
+  try { r.ingredients_de = JSON.parse(r.ingredients_de || '[]'); } catch { r.ingredients_de = []; }
+  try { r.steps_de = JSON.parse(r.steps_de || '[]'); } catch { r.steps_de = []; }
   try { r.tags = r.tags ? r.tags.split(',').map(t => t.trim()).filter(Boolean) : []; } catch { r.tags = []; }
   r.rating = parseFloat(r.rating) || 0;
   r.servings = parseInt(r.servings) || 4;
@@ -37,6 +39,8 @@ function recipeToRow(recipe) {
     recipe.image_url || '',
     recipe.created_at || new Date().toISOString(),
     new Date().toISOString(),
+    JSON.stringify(recipe.ingredients_de || []),
+    JSON.stringify(recipe.steps_de || []),
   ];
 }
 
@@ -92,7 +96,7 @@ async function getAccessToken() {
 
 // ── Read (uses API key — public read) ─────────────────────────────────────
 export async function fetchRecipes() {
-  const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A2:P?key=${CONFIG.SHEETS_API_KEY}`;
+  const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A2:R?key=${CONFIG.SHEETS_API_KEY}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error('Failed to fetch recipes from Google Sheets');
   const data = await res.json();
@@ -103,7 +107,7 @@ export async function fetchRecipes() {
 export async function appendRecipe(recipe) {
   const token = await getAccessToken();
   const row = recipeToRow(recipe);
-  const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A:P:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+  const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -158,12 +162,12 @@ export async function deleteRecipe(rowIndex) {
 }
 
 export async function ensureHeaderRow() {
-  const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A1:P1?key=${CONFIG.SHEETS_API_KEY}`;
+  const url = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A1:R1?key=${CONFIG.SHEETS_API_KEY}`;
   const res = await fetch(url);
   const data = await res.json();
   if (!data.values || !data.values[0] || data.values[0][0] !== 'id') {
     const token = await getAccessToken();
-    const writeUrl = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A1:P1?valueInputOption=RAW`;
+    const writeUrl = `${BASE}/${CONFIG.SHEETS_ID}/values/${CONFIG.SHEET_NAME}!A1:R1?valueInputOption=RAW`;
     await fetch(writeUrl, {
       method: 'PUT',
       headers: {

@@ -63,6 +63,9 @@ Important rules:
 - For items measured in pieces (eggs, cloves), use unit: "pcs".
 - Infer category from the recipe type.
 - Tags should be descriptive: e.g. vegetarian, quick, family-favourite, Christmas, etc.
+- Always provide both ingredients and ingredients_de, and both steps and steps_de.
+- If the recipe is already in German, ingredients_de and steps_de are the originals; ingredients and steps are the English translations.
+- If the recipe is in English, ingredients and steps are the originals; ingredients_de and steps_de are German translations.
 - The image may be rotated — always orient it correctly before reading.
 - For handwritten recipes, read each word carefully. The title is the most important field to get right.
 - If a letter-grade rating is visible (e.g. A, B+, A-) in the image, convert it to stars: A=5, B+=4, B=3, C=2.
@@ -192,31 +195,4 @@ ${catalog}
 When referring to a specific recipe from the collection, wrap its title in [[double brackets]] so the app can link to it.`;
 
   return callClaude(messages, system, 600);
-}
-
-// ── Translate recipe content ───────────────────────────────────────────────
-export async function translateRecipeContent(recipe, targetLang) {
-  if (targetLang === 'en') return null; // English is always the stored version
-
-  const system = 'You are a recipe translation assistant. Return ONLY valid JSON, no markdown.';
-  const prompt = `Translate the following recipe ingredients and steps to ${targetLang === 'de' ? 'German' : 'English'}.
-Keep ingredient names natural and idiomatic (e.g. use common German cooking terms).
-Keep amounts and units unchanged.
-
-Ingredients:
-${JSON.stringify(recipe.ingredients)}
-
-Steps:
-${JSON.stringify(recipe.steps)}
-
-Return JSON:
-{
-  "ingredients": [{ "name": "translated name", "amount": same, "unit": same, "notes": "translated notes" }],
-  "steps": ["translated step 1", "translated step 2"]
-}`;
-
-  const text = await callClaude([{ role: 'user', content: prompt }], system, 2000);
-  const clean = text.replace(/```json\n?|\n?```/g, '').trim();
-  const jsonMatch = clean.match(/\{[\s\S]*\}/);
-  return JSON.parse(jsonMatch ? jsonMatch[0] : clean);
 }

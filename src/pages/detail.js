@@ -1,10 +1,7 @@
 import { state } from '../lib/state.js';
 import { starsHTML, categoryEmoji, formatTime, icons, toast, shareRecipeText } from '../lib/ui.js';
 import { formatAmount } from '../lib/units.js';
-import { getSuggestions, translateRecipeContent } from '../lib/ai.js';
-
-// Cache translations so we don't call the API repeatedly
-const translationCache = {};
+import { getSuggestions } from '../lib/ai.js';
 
 export function renderDetailPage(container) {
   const recipe = state.currentRecipe;
@@ -68,13 +65,11 @@ export function renderDetailPage(container) {
           </button>
         </div>
 
-        <!-- Ingredients & Steps (may be translated) -->
-        <div id="ingredients-section">
-          ${renderIngredients(recipe.ingredients, scale)}
-        </div>
-        <div id="steps-section">
-          ${renderSteps(recipe.steps)}
-        </div>
+        <!-- Ingredients & Steps -->
+        ${(() => {
+          const { ingredients, steps } = getDisplayContent(recipe);
+          return renderIngredients(ingredients, scale) + renderSteps(steps);
+        })()}
 
         ${recipe.notes ? `
           <div class="detail-section">
@@ -126,8 +121,14 @@ export function renderDetailPage(container) {
   // Load AI suggestions quietly
   loadSuggestions(recipe);
 
-  // Load translation if German is selected
-  loadTranslation(recipe, scale);
+}
+
+function getDisplayContent(recipe) {
+  const lang = state.get('displayLang');
+  const useDE = lang === 'de';
+  const ingredients = useDE && recipe.ingredients_de?.length ? recipe.ingredients_de : recipe.ingredients;
+  const steps = useDE && recipe.steps_de?.length ? recipe.steps_de : recipe.steps;
+  return { ingredients, steps };
 }
 
 function renderIngredients(ingredients, scale) {
@@ -164,37 +165,6 @@ function renderSteps(steps) {
       </ol>
     </div>
   `;
-}
-
-async function loadTranslation(recipe, scale) {
-  const lang = state.get('displayLang');
-  if (lang === 'en') return; // already in English
-
-  const cacheKey = recipe.id + '_de';
-
-  // Show loading state
-  const ingsEl = document.getElementById('ingredients-section');
-  const stepsEl = document.getElementById('steps-section');
-  if (!ingsEl || !stepsEl) return;
-
-  if (!translationCache[cacheKey]) {
-    ingsEl.style.opacity = '0.5';
-    stepsEl.style.opacity = '0.5';
-    try {
-      const translated = await translateRecipeContent(recipe, lang);
-      if (translated) translationCache[cacheKey] = translated;
-    } catch (e) {
-      // Silently fall back to English
-    }
-    ingsEl.style.opacity = '1';
-    stepsEl.style.opacity = '1';
-  }
-
-  const translation = translationCache[cacheKey];
-  if (!translation) return;
-
-  if (ingsEl) ingsEl.innerHTML = renderIngredients(translation.ingredients || recipe.ingredients, scale);
-  if (stepsEl) stepsEl.innerHTML = renderSteps(translation.steps || recipe.steps);
 }
 
 async function loadSuggestions(recipe) {
