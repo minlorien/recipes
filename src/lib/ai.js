@@ -84,9 +84,17 @@ Do not confuse visually similar letters in handwriting (e.g. K vs W, H vs B, u v
     ]
   }], system, 3000);
 
-  // Strip any accidental markdown fences
-  const clean = text.replace(/```json\n?|\n?```/g, '').trim();
-  return JSON.parse(clean);
+  // Strip any accidental markdown fences or surrounding text
+  let clean = text.replace(/```json\n?|\n?```/g, '').trim();
+  // Extract just the JSON object if there's surrounding text
+  const jsonMatch = clean.match(/\{[\s\S]*\}/);
+  if (jsonMatch) clean = jsonMatch[0];
+  try {
+    return JSON.parse(clean);
+  } catch (e) {
+    console.error('Failed to parse AI response:', clean);
+    throw new Error('Could not parse recipe: ' + e.message);
+  }
 }
 
 // ── Get AI recipe suggestions ──────────────────────────────────────────────
