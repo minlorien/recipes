@@ -82,7 +82,7 @@ Important rules:
 - The image may be rotated or upside down — carefully orient it correctly before reading. Read all text in the correct orientation.
 - Steps must be extracted in the correct sequential order as written. Number ONE or step 1 comes first.
 - For handwritten recipes, read each word carefully. The title is the most important field to get right.
-- If a letter-grade rating is visible (e.g. A, B+, A-) in the image, convert it to stars: A=5, B+=4, B=3, C=2.;
+- If a letter-grade rating is visible (e.g. A, B+, A-) in the image, convert it to stars: A=5, B+=4, B=3, C=2.`;
 
   const text = await callClaude([{
     role: 'user',
