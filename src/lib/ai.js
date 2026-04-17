@@ -76,14 +76,13 @@ Important rules:
 - Infer category from the recipe type.
 - Tags should be descriptive: e.g. vegetarian, quick, family-favourite, Christmas, etc.
 - Always provide both ingredients and ingredients_de, and both steps and steps_de.
-- If the recipe is already in German, ingredients_de and steps_de are the originals; ingredients and steps are the English translations.
+- CRITICAL: Always provide BOTH ingredients AND ingredients_de, and BOTH steps AND steps_de. Never leave these empty.
+- If the recipe is in German, ingredients_de and steps_de are the originals; ingredients and steps are English translations.
 - If the recipe is in English, ingredients and steps are the originals; ingredients_de and steps_de are German translations.
-- The image may be rotated — always orient it correctly before reading.
+- The image may be rotated or upside down — carefully orient it correctly before reading. Read all text in the correct orientation.
+- Steps must be extracted in the correct sequential order as written. Number ONE or step 1 comes first.
 - For handwritten recipes, read each word carefully. The title is the most important field to get right.
-- If a letter-grade rating is visible (e.g. A, B+, A-) in the image, convert it to stars: A=5, B+=4, B=3, C=2.
-- The image may be rotated — always orient it correctly before reading.
-- For handwritten recipes, read each word carefully. The title is the most important field to get right.
-- If a letter-grade rating is visible (e.g. A, B+, A-) in the image, convert it: A=5, B+=4, B=3, C=2.`;
+- If a letter-grade rating is visible (e.g. A, B+, A-) in the image, convert it to stars: A=5, B+=4, B=3, C=2.;
 
   const text = await callClaude([{
     role: 'user',
@@ -91,11 +90,12 @@ Important rules:
       { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64Image } },
       { type: 'text', text: `Extract this recipe into JSON format.
 
-Important: The image may be rotated (sideways or upside down) — mentally rotate it to read correctly before extracting.
-This may be a handwritten recipe in German or English. Read handwriting carefully character by character.
-The recipe title is usually the largest or most prominent text. Double-check you are reading it correctly.
-German words to watch for: Kalter=Cold, Hund=Dog, Kuchen=Cake, Brot=Bread, Torte=Tart, Suppe=Soup, Salat=Salad.
-Do not confuse visually similar letters in handwriting (e.g. K vs W, H vs B, u vs n).` }
+IMPORTANT BEFORE YOU START:
+1. First determine the correct orientation of the image — it may be rotated 90°, 180°, or upside down. Orient it mentally before reading anything.
+2. Extract steps in the correct sequential order (step 1 first, last step last). If the page is upside down, the last step may appear at the top.
+3. Always provide German translations in ingredients_de and steps_de — this is mandatory even for English recipes.
+4. This may be a handwritten recipe — read carefully character by character.
+5. Do not confuse visually similar letters (K vs W, H vs B, u vs n, d vs b).` }
     ]
   }], system, 3000);
 
