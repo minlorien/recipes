@@ -97,7 +97,7 @@ IMPORTANT BEFORE YOU START:
 4. This may be a handwritten recipe — read carefully character by character.
 5. Do not confuse visually similar letters (K vs W, H vs B, u vs n, d vs b).` }
     ]
-  }], system, 3000);
+  }], system, 4000);
 
   // Strip any accidental markdown fences or surrounding text
   let clean = text.replace(/```json\n?|\n?```/g, '').trim();
