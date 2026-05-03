@@ -1,6 +1,5 @@
 import { fetchRecipes } from './sheets.js';
 
-// ── Simple reactive state ──────────────────────────────────────────────────
 class State {
   constructor() {
     this._data = {
@@ -8,7 +7,7 @@ class State {
       recipes: [],
       loading: true,
       error: null,
-      currentPage: 'recipes', // recipes | detail | scan | shopping | menu | chat
+      currentPage: 'recipes',
       currentRecipeId: null,
       searchQuery: '',
       filterCategory: '',
@@ -30,7 +29,13 @@ class State {
   _notify() { this._listeners.forEach(fn => fn(this._data)); }
   subscribe(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); }
 
-  // ── Shopping list helpers ──
+  toggleLang() {
+    const next = this._data.displayLang === 'en' ? 'de' : 'en';
+    this._data.displayLang = next;
+    localStorage.setItem('displayLang', next);
+    this._notify();
+  }
+
   addToShopping(recipeId) {
     const list = this._data.shoppingList;
     if (!list.includes(recipeId)) {
@@ -57,13 +62,11 @@ class State {
     return this._data.shoppingServings[recipeId] || recipe?.servings || 4;
   }
 
-  // ── Derived ──
   get filteredRecipes() {
     let recipes = this._data.recipes;
     const q = this._data.searchQuery.toLowerCase().trim();
     const cat = this._data.filterCategory;
     const minRating = this._data.filterRating;
-
     if (q) {
       recipes = recipes.filter(r =>
         r.title?.toLowerCase().includes(q) ||
@@ -88,13 +91,6 @@ class State {
       .filter(Boolean);
   }
 
-  toggleLang() {
-    const next = this._data.displayLang === 'en' ? 'de' : 'en';
-    this._data.displayLang = next;
-    localStorage.setItem('displayLang', next);
-    this._notify();
-  }
-
   navigate(page, recipeId = null) {
     this.set({ currentPage: page, currentRecipeId: recipeId });
     window.scrollTo(0, 0);
@@ -103,29 +99,38 @@ class State {
 
 export const state = new State();
 
-// ── Auth ───────────────────────────────────────────────────────────────────
-import { CONFIG } from '../config.js';
-
-export function checkAuth() {
-  return sessionStorage.getItem('auth') === 'ok';
+// ── Session token (stored in sessionStorage, never the password) ───────────
+export function getToken() {
+  return sessionStorage.getItem('session_token');
 }
 
-export function login(password) {
-  if (password === CONFIG.APP_PASSWORD) {
-    sessionStorage.setItem('auth', 'ok');
+export function checkAuth() {
+  return !!getToken();
+}
+
+export async function login(password) {
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) return false;
+    const { token } = await res.json();
+    sessionStorage.setItem('session_token', token);
     state.set({ authenticated: true });
     loadRecipes();
     return true;
+  } catch {
+    return false;
   }
-  return false;
 }
 
 export function logout() {
-  sessionStorage.removeItem('auth');
+  sessionStorage.removeItem('session_token');
   state.set({ authenticated: false, recipes: [] });
 }
 
-// ── Data loading ───────────────────────────────────────────────────────────
 export async function loadRecipes() {
   state.set({ loading: true, error: null });
   try {
