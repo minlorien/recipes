@@ -21,17 +21,47 @@ const CONVERSIONS = {
   mm:    { to: 'in',   factor: 0.0393701 },
 };
 
-// Cup fractions for nice display
+// Standard cup fractions — always snap to nearest, never show decimals
 const CUP_FRACTIONS = [
-  [1, '1 cup'], [0.75, '¾ cup'], [0.667, '⅔ cup'], [0.5, '½ cup'],
-  [0.333, '⅓ cup'], [0.25, '¼ cup'], [0.125, '⅛ cup'],
+  [0,     ''],
+  [0.125, '⅛'],
+  [0.25,  '¼'],
+  [0.333, '⅓'],
+  [0.5,   '½'],
+  [0.667, '⅔'],
+  [0.75,  '¾'],
+  [1,     ''],  // whole number, no fraction label needed
 ];
 
-function nearestCupFraction(val) {
-  for (const [frac, label] of CUP_FRACTIONS) {
-    if (Math.abs(val - frac) < 0.07) return label;
+function formatCups(cups) {
+  const whole = Math.floor(cups);
+  const frac  = cups - whole;
+
+  // Snap fractional part to nearest standard fraction
+  let best = CUP_FRACTIONS[0];
+  let bestDist = Infinity;
+  for (const entry of CUP_FRACTIONS) {
+    const dist = Math.abs(frac - entry[0]);
+    if (dist < bestDist) { bestDist = dist; best = entry; }
   }
-  return null;
+
+  const fracVal   = best[0];
+  const fracLabel = best[1];
+
+  // If fraction rounds up to 1, carry into whole
+  const totalWhole = fracVal === 1 ? whole + 1 : whole;
+  const unit = totalWhole === 1 && fracVal === 0 ? 'cup' : 'cups';
+
+  if (totalWhole === 0) {
+    // Pure fraction: "½ cup"
+    return `${fracLabel} cup`;
+  }
+  if (fracVal === 0 || fracVal === 1) {
+    // Whole number only: "1 cup", "2 cups"
+    return `${totalWhole} ${unit}`;
+  }
+  // Mixed: "1½ cups"
+  return `${totalWhole}${fracLabel} ${unit}`;
 }
 
 export function toImperial(amount, unit) {
@@ -65,13 +95,7 @@ export function toImperial(amount, unit) {
     }
     // ¼ cup to 4 cups → cup fractions
     if (cups >= 0.25) {
-      const whole   = Math.floor(cups);
-      const frac    = cups - whole;
-      const fracStr = nearestCupFraction(frac);
-      if (whole === 0 && fracStr) return fracStr;
-      if (whole > 0  && fracStr) return `${whole} ${fracStr}`;
-      // fallback if fraction doesn't snap to a standard value
-      return `${roundNice(cups)} cups`;
+      return formatCups(cups);
     }
     // 1 tbsp to < ¼ cup → tablespoons
     if (tbsp >= 1) {
@@ -81,7 +105,7 @@ export function toImperial(amount, unit) {
     return `${roundNice(tsp)} tsp`;
   }
 
-  // Litres → quarts (already sensible for large volumes)
+  // Litres → quarts
   return `${roundNice(converted)} ${conv.to}`;
 }
 
