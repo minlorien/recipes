@@ -21,13 +21,13 @@ const CONVERSIONS = {
   mm:    { to: 'in',   factor: 0.0393701 },
 };
 
-// Volume fractions for nice display
+// Cup fractions for nice display
 const CUP_FRACTIONS = [
   [1, '1 cup'], [0.75, '¾ cup'], [0.667, '⅔ cup'], [0.5, '½ cup'],
   [0.333, '⅓ cup'], [0.25, '¼ cup'], [0.125, '⅛ cup'],
 ];
 
-function nearestFraction(val) {
+function nearestCupFraction(val) {
   for (const [frac, label] of CUP_FRACTIONS) {
     if (Math.abs(val - frac) < 0.07) return label;
   }
@@ -39,47 +39,49 @@ export function toImperial(amount, unit) {
   const conv = CONVERSIONS[unit.toLowerCase()];
   if (!conv) return null;
 
+  // Temperature
   if (conv.convert) {
     return `${conv.convert(amount)}${conv.to}`;
   }
 
-  // Check if we should use the "above" unit (e.g. g → lb)
+  // Weight: g → oz, with g → lb above 500g
   if (conv.threshold && amount >= conv.threshold && conv.above) {
     const a = conv.above;
-    const converted = amount * a.factor;
-    return `${roundNice(converted)} ${a.to}`;
+    return `${roundNice(amount * a.factor)} ${a.to}`;
   }
 
   const converted = amount * conv.factor;
 
-  // Volume: use the tsp → tbsp → cup ladder
+  // Volume: use the full cooking ladder, never fl oz
   if (conv.to === 'fl oz') {
     const tsp  = amount / 4.92892;
     const tbsp = amount / 14.7868;
     const cups = amount / 236.588;
+    const qt   = amount / 946.353;
 
-    // 4+ cups → plain cups (e.g. "6 cups")
-    if (cups >= 4) {
-      return `${roundNice(cups)} cups`;
+    // > 4 cups → quarts
+    if (cups > 4) {
+      return `${roundNice(qt)} qt`;
     }
-    // ¼ cup and above → cup fractions (e.g. "½ cup", "1 ½ cup")
+    // ¼ cup to 4 cups → cup fractions
     if (cups >= 0.25) {
-      const whole    = Math.floor(cups);
-      const frac     = cups - whole;
-      const fracStr  = nearestFraction(frac);
+      const whole   = Math.floor(cups);
+      const frac    = cups - whole;
+      const fracStr = nearestCupFraction(frac);
       if (whole === 0 && fracStr) return fracStr;
       if (whole > 0  && fracStr) return `${whole} ${fracStr}`;
-      // fallback if fraction doesn't snap nicely
+      // fallback if fraction doesn't snap to a standard value
       return `${roundNice(cups)} cups`;
     }
-    // 1–3 tbsp → tablespoons (e.g. "2 tbsp")
+    // 1 tbsp to < ¼ cup → tablespoons
     if (tbsp >= 1) {
       return `${roundNice(tbsp)} tbsp`;
     }
-    // Under 1 tbsp → teaspoons (e.g. "½ tsp")
+    // < 1 tbsp → teaspoons
     return `${roundNice(tsp)} tsp`;
   }
 
+  // Litres → quarts (already sensible for large volumes)
   return `${roundNice(converted)} ${conv.to}`;
 }
 
