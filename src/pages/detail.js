@@ -128,14 +128,14 @@ function renderIngredients(ingredients, scale) {
       <ul class="ingredient-list">
         ${ingredients.map(ing => {
           const scaled = ing.amount ? ing.amount * scale : 0;
-          const { metric, imperial } = formatAmount(scaled, ing.unit);
+          const { main, other } = formatAmount(scaled, ing.unit);
           return `
             <li>
               <span class="ing-name">${esc(ing.name)}${ing.notes ? `<span class="text-muted text-sm"> — ${esc(ing.notes)}</span>` : ''}</span>
               ${scaled ? `
                 <span style="text-align:right;">
-                  <span class="ing-amount">${esc(metric)}</span>
-                  ${imperial ? `<span class="ing-amount-imperial"> / ${esc(imperial)}</span>` : ''}
+                  <span class="ing-amount">${esc(main)}</span>
+                  ${other ? `<span class="ing-amount-imperial"> / ${esc(other)}</span>` : ''}
                 </span>
               ` : '<span class="text-muted text-sm">to taste</span>'}
             </li>

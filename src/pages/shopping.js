@@ -83,8 +83,8 @@ export function renderShoppingPage(container) {
                 </div>
                 <div style="text-align:right;">
                   ${item.totalAmount ? `
-                    <span class="item-amount">${esc(item.metric)}</span>
-                    ${item.imperial ? `<br><span class="text-sm text-muted">${esc(item.imperial)}</span>` : ''}
+                    <span class="item-amount">${esc(item.main)}</span>
+                    ${item.other ? `<br><span class="text-sm text-muted">${esc(item.other)}</span>` : ''}
                   ` : ''}
                 </div>
               </label>
@@ -131,7 +131,7 @@ export function renderShoppingPage(container) {
   container.querySelector('#share-list-btn').addEventListener('click', () => {
     const text = `🛒 Shopping List\n\n` +
       `For: ${shoppingRecipes.map(titleOf).join(', ')}\n\n` +
-      merged.map(item => `• ${item.name}${item.totalAmount ? `: ${item.metric}${item.imperial ? ` (${item.imperial})` : ''}` : ''}`).join('\n') +
+      merged.map(item => `• ${item.name}${item.totalAmount ? `: ${item.main}${item.other ? ` (${item.other})` : ''}` : ''}`).join('\n') +
       `\n\nFrom our family recipe book 📖`;
 
     if (navigator.share) {

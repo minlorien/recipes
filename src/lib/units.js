@@ -1,153 +1,136 @@
-// Metric → Imperial conversion utilities
-// All amounts stored internally in metric; displayed in both
-const CONVERSIONS = {
-  // Volume
-  ml:    { to: 'fl oz', factor: 0.033814 },
-  l:     { to: 'qt',   factor: 1.05669 },
-  // Cooking volume (already imperial-ish, show ml equivalent)
-  tsp:   { to: 'ml',   factor: 4.92892 },
-  tbsp:  { to: 'ml',   factor: 14.7868 },
-  cup:   { to: 'ml',   factor: 236.588 },
-  // Weight
-  g:     { to: 'oz',   factor: 0.035274, threshold: 500, above: { from: 'g', to: 'lb', factor: 0.00220462 } },
-  kg:    { to: 'lb',   factor: 2.20462 },
-  oz:    { to: 'g',    factor: 28.3495 },
-  lb:    { to: 'g',    factor: 453.592 },
-  // Temperature
-  '°c':  { to: '°F',   convert: (c) => Math.round(c * 9/5 + 32) },
-  '°C':  { to: '°F',   convert: (c) => Math.round(c * 9/5 + 32) },
-  // Length
-  cm:    { to: 'in',   factor: 0.393701 },
-  mm:    { to: 'in',   factor: 0.0393701 },
+// Amounts are stored as written in the recipe (2 tsp, 1 cup, 200 g, 1 EL).
+// Display shows that original as the main amount, plus the equivalent in the
+// other system when it's useful: imperial → metric, metric → US kitchen units.
+
+// Spellings the scanner (or a person editing) might use → canonical unit.
+const ALIASES = {
+  teaspoon: 'tsp', teaspoons: 'tsp', tsps: 'tsp',
+  tablespoon: 'tbsp', tablespoons: 'tbsp', tbs: 'tbsp', tbl: 'tbsp', tbsps: 'tbsp',
+  cups: 'cup',
+  ounce: 'oz', ounces: 'oz',
+  pound: 'lb', pounds: 'lb', lbs: 'lb',
+  'fl. oz': 'fl oz', 'fl.oz': 'fl oz', floz: 'fl oz', 'fluid ounce': 'fl oz', 'fluid ounces': 'fl oz',
+  pints: 'pint', pt: 'pint', quart: 'qt', quarts: 'qt',
+  gram: 'g', grams: 'g', gr: 'g', kilogram: 'kg', kilograms: 'kg',
+  millilitre: 'ml', milliliter: 'ml', millilitres: 'ml', milliliters: 'ml',
+  litre: 'l', liter: 'l', litres: 'l', liters: 'l',
+  tl: 'TL', el: 'EL',
+  '°f': '°F', '°c': '°C',
 };
 
-// Standard cup fractions — always snap to nearest, never show decimals
-const CUP_FRACTIONS = [
-  [0,     ''],
-  [0.125, '⅛'],
-  [0.25,  '¼'],
-  [0.333, '⅓'],
-  [0.5,   '½'],
-  [0.667, '⅔'],
-  [0.75,  '¾'],
-  [1,     ''],  // whole number, no fraction label needed
-];
-
-function formatCups(cups) {
-  const whole = Math.floor(cups);
-  const frac  = cups - whole;
-
-  // Snap fractional part to nearest standard fraction
-  let best = CUP_FRACTIONS[0];
-  let bestDist = Infinity;
-  for (const entry of CUP_FRACTIONS) {
-    const dist = Math.abs(frac - entry[0]);
-    if (dist < bestDist) { bestDist = dist; best = entry; }
-  }
-
-  const fracVal   = best[0];
-  const fracLabel = best[1];
-
-  // If fraction rounds up to 1, carry into whole
-  const totalWhole = fracVal === 1 ? whole + 1 : whole;
-  const unit = totalWhole === 1 && fracVal === 0 ? 'cup' : 'cups';
-
-  if (totalWhole === 0) {
-    // Pure fraction: "½ cup"
-    return `${fracLabel} cup`;
-  }
-  if (fracVal === 0 || fracVal === 1) {
-    // Whole number only: "1 cup", "2 cups"
-    return `${totalWhole} ${unit}`;
-  }
-  // Mixed: "1½ cups"
-  return `${totalWhole}${fracLabel} ${unit}`;
+export function normalizeUnit(unit) {
+  const u = String(unit || '').trim().replace(/\.$/, '');
+  const lower = u.toLowerCase();
+  if (ALIASES[lower]) return ALIASES[lower];
+  if (/^(g|kg|ml|l|tsp|tbsp|cup|oz|lb|qt|pint|fl oz)$/.test(lower)) return lower;
+  return u;
 }
 
-export function toImperial(amount, unit) {
-  if (!amount || !unit) return null;
-  // Litres use the same tsp/tbsp/cup/qt ladder as millilitres.
-  if (unit.toLowerCase() === 'l') return toImperial(amount * 1000, 'ml');
-  const conv = CONVERSIONS[unit.toLowerCase()];
-  if (!conv) return null;
+// Spoon and cup measures read best as fractions: "1½ tsp", "¾ cup".
+const FRACTION_UNITS = new Set(['tsp', 'tbsp', 'cup', 'TL', 'EL']);
 
-  // Temperature
-  if (conv.convert) {
-    return `${conv.convert(amount)}${conv.to}`;
-  }
+// Equivalent in the other system: [target unit, factor] (temperatures handled separately).
+const TO_METRIC = {
+  tsp:  ['ml', 5],      // kitchen convention, as on measuring spoons
+  tbsp: ['ml', 15],
+  cup:  ['ml', 240],
+  'fl oz': ['ml', 29.5735],
+  pint: ['ml', 473.176],
+  qt:   ['ml', 946.353],
+  oz:   ['g', 28.3495],
+  lb:   ['g', 453.592],
+  in:   ['cm', 2.54],
+};
 
-  // Weight: g → oz, with g → lb above 500g
-  if (conv.threshold && amount >= conv.threshold && conv.above) {
-    const a = conv.above;
-    return `${roundNice(amount * a.factor)} ${a.to}`;
-  }
+const FRACTIONS = [
+  [0, ''], [0.125, '⅛'], [0.25, '¼'], [0.333, '⅓'], [0.5, '½'],
+  [0.667, '⅔'], [0.75, '¾'], [1, ''],
+];
 
-  const converted = amount * conv.factor;
-
-  // Volume: use the full cooking ladder, never fl oz
-  if (conv.to === 'fl oz') {
-    const tsp  = amount / 4.92892;
-    const tbsp = amount / 14.7868;
-    const cups = amount / 236.588;
-    const qt   = amount / 946.353;
-
-    // > 4 cups → quarts
-    if (cups > 4) {
-      return `${roundNice(qt)} qt`;
-    }
-    // ¼ cup to 4 cups → cup fractions
-    if (cups >= 0.25) {
-      return formatCups(cups);
-    }
-    // 1 tbsp to < ¼ cup → tablespoons
-    if (tbsp >= 1) {
-      return `${roundNice(tbsp)} tbsp`;
-    }
-    // < 1 tbsp → teaspoons
-    return `${roundNice(tsp)} tsp`;
-  }
-
-  // Everything else (kg → lb, cm → in, …)
-  return `${roundNice(converted)} ${conv.to}`;
+// 1.5 → "1½", 0.25 → "¼", 2 → "2". Snaps to the nearest kitchen fraction.
+function fraction(n) {
+  let whole = Math.floor(n);
+  let best = FRACTIONS[0];
+  for (const f of FRACTIONS) if (Math.abs(n - whole - f[0]) < Math.abs(n - whole - best[0])) best = f;
+  if (best[0] === 1) whole += 1;
+  if (!best[1]) return String(whole || (n > 0 ? '⅛' : 0));
+  return whole ? `${whole}${best[1]}` : best[1];
 }
 
 function roundNice(n) {
+  if (n >= 100) return Math.round(n / 5) * 5;
   if (n >= 10) return Math.round(n);
   if (n >= 1)  return Math.round(n * 10) / 10;
   return Math.round(n * 100) / 100;
 }
 
-export function formatAmount(amount, unit, scale = 1) {
-  const scaled   = amount * scale;
-  const metric   = `${roundNice(scaled)}${unit ? ' ' + unit : ''}`;
-  const imperial = toImperial(scaled, unit);
-  return { metric, imperial };
+function cupWord(n, unit) {
+  return unit === 'cup' && n > 1.0625 ? 'cups' : unit;
 }
 
-export function scaleIngredients(ingredients, servings, baseServings) {
-  const scale = servings / baseServings;
-  return ingredients.map(ing => ({
-    ...ing,
-    ...formatAmount(ing.amount, ing.unit, scale),
-    scaledAmount: ing.amount * scale,
-  }));
+// The amount in the recipe's own unit.
+function formatOriginal(amount, unit) {
+  if (FRACTION_UNITS.has(unit)) return `${fraction(amount)} ${cupWord(amount, unit)}`;
+  return `${roundNice(amount)}${unit ? ' ' + unit : ''}`;
 }
 
-// Temperature helper
-export function formatTemp(celsius) {
-  return `${celsius}°C (${Math.round(celsius * 9/5 + 32)}°F)`;
+// Metric (ml) → the US kitchen measure a cook would actually use.
+function mlToKitchen(ml) {
+  const cups = ml / 236.588;
+  if (cups > 4) return `${roundNice(ml / 946.353)} qt`;
+  if (cups >= 0.25) return `${fraction(cups)} ${cupWord(cups, 'cup')}`;
+  const tbsp = ml / 14.7868;
+  if (tbsp >= 1) return `${fraction(tbsp)} tbsp`;
+  return `${fraction(ml / 4.92892)} tsp`;
 }
 
-// Merge duplicate ingredients across recipes for shopping list
+// The equivalent in the other system, or null when there isn't a useful one.
+function formatOther(amount, unit) {
+  // Oven dials go in steps of 5 (or more), so round to 5.
+  if (unit === '°F') return `${Math.round((amount - 32) * 5 / 9 / 5) * 5} °C`;
+  if (unit === '°C') return `${Math.round((amount * 9 / 5 + 32) / 5) * 5} °F`;
+
+  // German spoons are the same size as US ones: show ml.
+  if (unit === 'TL') return `${roundNice(amount * 5)} ml`;
+  if (unit === 'EL') return `${roundNice(amount * 15)} ml`;
+
+  if (TO_METRIC[unit]) {
+    const [to, factor] = TO_METRIC[unit];
+    const v = amount * factor;
+    if (to === 'g' && v >= 1000) return `${roundNice(v / 1000)} kg`;
+    if (to === 'ml' && v >= 1000) return `${roundNice(v / 1000)} l`;
+    return `${roundNice(v)} ${to}`;
+  }
+
+  switch (unit) {
+    case 'ml': return mlToKitchen(amount);
+    case 'l':  return mlToKitchen(amount * 1000);
+    // Under ½ oz an ounce figure is useless to a cook ("0.18 oz"), so leave it out.
+    case 'g':  return amount < 14 ? null : amount >= 450 ? `${roundNice(amount / 453.592)} lb` : `${fraction(amount / 28.3495)} oz`;
+    case 'kg': return `${roundNice(amount * 2.20462)} lb`;
+    case 'cm': return `${roundNice(amount / 2.54)} in`;
+    case 'mm': return `${roundNice(amount / 25.4)} in`;
+    default:   return null;
+  }
+}
+
+// { main: "1½ tsp", other: "7.4 ml" } — `other` may be null.
+export function formatAmount(amount, unit) {
+  const u = normalizeUnit(unit);
+  return { main: formatOriginal(amount, u), other: formatOther(amount, u) };
+}
+
+// Merge duplicate ingredients across recipes for the shopping list
 export function mergeIngredients(recipeIngredientLists) {
   const merged = {};
   for (const { recipe, ingredients, servings, baseServings } of recipeIngredientLists) {
     const scale = servings / (baseServings || servings);
     for (const ing of ingredients) {
       // Only add up amounts that share a unit ("2 pcs" + "100 g" eggs stay separate).
-      const key = `${ing.name.toLowerCase().trim()}|${(ing.unit || '').toLowerCase()}`;
+      const unit = normalizeUnit(ing.unit);
+      const key = `${ing.name.toLowerCase().trim()}|${unit.toLowerCase()}`;
       if (!merged[key]) {
-        merged[key] = { name: ing.name, unit: ing.unit, totalAmount: 0, recipes: [] };
+        merged[key] = { name: ing.name, unit, totalAmount: 0, recipes: [] };
       }
       merged[key].totalAmount += (ing.amount || 0) * scale;
       if (!merged[key].recipes.includes(recipe)) {

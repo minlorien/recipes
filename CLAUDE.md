@@ -32,7 +32,7 @@ src/main.js                  shell, router, login screen, EN/DE toggle
 src/lib/state.js             state, session token, shopping list (localStorage)
 src/lib/sheets.js            sheet row <-> recipe mapping, calls /api/sheets/*
 src/lib/ai.js                prompts + callClaude() → /api/ai
-src/lib/units.js             metric storage, metric + imperial display
+src/lib/units.js             unit aliases; original amount + other-system equivalent
 src/lib/ui.js                icons, toasts, fileToBase64 (resize 1568px + grayscale)
 src/pages/*.js               recipes, detail, scan, shopping, chat
 ```
@@ -42,7 +42,9 @@ src/pages/*.js               recipes, detail, scan, shopping, chat
 `id, title, title_de, category, servings, prep_mins, cook_mins, rating, language, tags,
 ingredients, steps, notes, image_url, created_at, updated_at, ingredients_de, steps_de`
 
-`ingredients*` / `steps*` are JSON strings. `tags` is comma-separated. Amounts stored metric.
+`ingredients*` / `steps*` are JSON strings. `tags` is comma-separated. `ingredients` keeps amounts/units as written in the original
+(1 tsp stays 1 tsp — never convert to g, it showed as "0.18 oz"); `ingredients_de` is metric
+(cups/oz/lb → g/ml, tsp/tbsp → TL/EL). Recipes scanned before Oct 2026 are all-metric.
 
 ## Cloudflare environment variables (Settings → Variables)
 
@@ -65,7 +67,8 @@ ingredients, steps, notes, image_url, created_at, updated_at, ingredients_de, st
 - Don't commit `.env` or service-account JSON files. GitHub push protection will block it,
   and a blocked commit still sits in local history (needs an orphan-branch rewrite).
 - Keep the UI usable by a non-technical person on a phone: big tap targets, no jargon.
-- Always show both metric and imperial amounts.
+- Always show both metric and imperial amounts: the original first, then the equivalent
+  (except tiny gram amounts, where ounces are meaningless).
 - Bert prefers whole functions/files when shown code, not fragments to splice in.
 
 ## Deploy & verify

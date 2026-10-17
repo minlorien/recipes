@@ -195,7 +195,7 @@ function showRecipeForm(formArea) {
           <h3>Ingredients</h3>
           <button class="btn btn-outline btn-sm" id="add-ing-btn">${icons.plus} Add</button>
         </div>
-        <p class="text-muted text-sm mb-8">Amounts in metric (g, ml, kg, l). Leave the amount empty for "to taste".</p>
+        <p class="text-muted text-sm mb-8">Amounts as written in the recipe, e.g. 1.5 tsp, 1 cup, 200 g. Leave the amount empty for "to taste".</p>
         <div id="ingredients-list">
           ${(r.ingredients || []).map(ingredientRowHTML).join('')}
         </div>

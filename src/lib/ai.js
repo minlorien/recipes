@@ -84,9 +84,14 @@ Field guide:
 - notes: any notes or tips on the page, otherwise "".
 
 Rules:
-- Convert ALL amounts to metric (g, ml, kg, l, °C, cm). Store only metric.
+Amounts and units:
+- "ingredients" keeps the amounts and units EXACTLY as written in the recipe. Never convert them: "1 tsp salt" stays amount 1, unit "tsp"; "1 cup flour" stays amount 1, unit "cup"; "200 g" stays 200 "g". Fractions become decimals (1½ → 1.5, ⅓ → 0.333).
+- "ingredients_de" is for a German kitchen, so it uses metric: convert cups, oz, lb, fl oz, pints and quarts to g or ml (dry ingredients by weight in g, e.g. 1 cup flour = 125 g, 1 cup sugar = 200 g, 1 cup butter = 225 g; liquids in ml), rounded to sensible kitchen amounts. Spoons stay spoons: tsp → "TL", tbsp → "EL" (same number). Metric amounts stay as they are.
+- If the original is German, "ingredients" (English) keeps the German amounts, with TL → "tsp" and EL → "tbsp".
+- Use these unit spellings: g, kg, ml, l, tsp, tbsp, cup, oz, lb, fl oz, pint, qt, pinch, pcs (English); g, kg, ml, l, TL, EL, Prise, Stück (German). Other units (can, clove, bunch, Dose, Zehe, Bund …) as written.
 - For uncountable items (e.g. "salt to taste") use amount 0 and unit "".
-- For items counted in pieces use unit "pcs".
+- For items counted in pieces use unit "pcs" (German "Stück").
+- Oven temperatures in "steps" stay as written; in "steps_de" give them in °C (350 °F → 175 °C).
 - Ingredient notes hold preparation hints such as "finely chopped", otherwise "".
 - Always fill BOTH ingredients and ingredients_de, and BOTH steps and steps_de, with the same items in the same order.
 - If the recipe is in German, ingredients_de/steps_de are the originals and ingredients/steps are English translations; if it is in English, the other way round.
