@@ -8,7 +8,15 @@ import { renderChatPage } from './pages/chat.js';
 
 // ── Service Worker (PWA) ───────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  // When a new worker takes over, reload once so the page runs the new code.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    window.location.reload();
+  });
+  navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
 }
 
 // ── Toast container ────────────────────────────────────────────────────────

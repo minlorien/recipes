@@ -1,12 +1,12 @@
 import { CONFIG } from '../config.js';
 import { getToken } from './state.js';
 
+// The model is chosen server-side in functions/api/[[route]].js.
 async function callClaude(messages, system, maxTokens = 2000) {
   const res = await fetch(`${CONFIG.API_BASE}/ai`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-session-token': getToken() || '' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
       max_tokens: maxTokens,
       system,
       messages,
@@ -14,10 +14,23 @@ async function callClaude(messages, system, maxTokens = 2000) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || 'AI request failed');
+    const msg = typeof err.error === 'string' ? err.error : err.error?.message;
+    throw new Error(msg || 'AI request failed');
   }
   const data = await res.json();
-  return data.content[0].text;
+  if (data.stop_reason === 'refusal') {
+    throw new Error('The assistant could not help with this request.');
+  }
+  if (data.stop_reason === 'max_tokens') {
+    throw new Error('The answer was too long and got cut off. Please try again.');
+  }
+  // Responses can start with a thinking block — collect only the text blocks.
+  const text = (data.content || [])
+    .filter(b => b.type === 'text')
+    .map(b => b.text)
+    .join('');
+  if (!text) throw new Error('AI returned an empty answer');
+  return text;
 }
 
 export async function extractRecipeFromImage(base64Image, mimeType = 'image/jpeg') {
@@ -72,7 +85,7 @@ IMPORTANT BEFORE YOU START:
 4. For handwritten recipes, read carefully character by character.
 5. Do not confuse similar letters (K vs W, H vs B, u vs n).` }
     ]
-  }], system, 4000);
+  }], system, 8000);
 
   let clean = text.replace(/\`\`\`json\n?|\n?\`\`\`/g, '').trim();
   const jsonMatch = clean.match(/\{[\s\S]*\}/);
@@ -103,7 +116,7 @@ ${titles}
 
 Return JSON: { "suggestions": ["title1", "title2", "title3"], "reason": "brief friendly explanation" }`;
 
-  const text = await callClaude([{ role: 'user', content: prompt }], system, 500);
+  const text = await callClaude([{ role: 'user', content: prompt }], system, 1000);
   const clean = text.replace(/\`\`\`json\n?|\n?\`\`\`/g, '').trim();
   return JSON.parse(clean);
 }
@@ -122,7 +135,7 @@ ${options}
 
 Return JSON: { "menu": [{ "day": "Monday", "title": "recipe title", "reason": "brief reason" }], "note": "tip" }`;
 
-  const text = await callClaude([{ role: 'user', content: prompt }], system, 1000);
+  const text = await callClaude([{ role: 'user', content: prompt }], system, 2000);
   const clean = text.replace(/\`\`\`json\n?|\n?\`\`\`/g, '').trim();
   return JSON.parse(clean);
 }
@@ -142,7 +155,7 @@ ${catalog.map(r => `- ${r.title}: needs ${r.ingredients}`).join('\n')}
 Which can I make? Return JSON: { "matches": [{ "title": "title", "match": "full or partial", "missing": ["item"] }], "suggestion": "tip" }
 Sort by best match. Max 6 results.`;
 
-  const text = await callClaude([{ role: 'user', content: prompt }], system, 800);
+  const text = await callClaude([{ role: 'user', content: prompt }], system, 1500);
   const clean = text.replace(/\`\`\`json\n?|\n?\`\`\`/g, '').trim();
   return JSON.parse(clean);
 }
@@ -159,5 +172,5 @@ ${catalog}
 
 When referring to a recipe, wrap its title in [[double brackets]].`;
 
-  return callClaude(messages, system, 600);
+  return callClaude(messages, system, 1500);
 }

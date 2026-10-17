@@ -1,56 +1,68 @@
-const CACHE = 'recipes-v1';
-const ASSETS = [
-  '/',
-  '/index.html',
-  '/src/styles/main.css',
-  '/src/main.js',
-  '/src/config.js',
-  '/src/lib/state.js',
-  '/src/lib/sheets.js',
-  '/src/lib/ai.js',
-  '/src/lib/units.js',
-  '/src/lib/ui.js',
-  '/src/pages/recipes.js',
-  '/src/pages/detail.js',
-  '/src/pages/scan.js',
-  '/src/pages/shopping.js',
-  '/src/pages/chat.js',
-];
+// Service worker for recipes.minlorien.net
+//
+// - No precache list: the old one listed /src/... paths that don't exist in dist/,
+//   so install failed and phones stayed on a stale worker forever.
+// - Pages (HTML/navigation): network-first, cached copy only when offline.
+// - Hashed build assets (/assets/*): cache-first, they never change.
+// - /api/* and other origins: never touched.
+//
+// Bump CACHE to force old caches to be deleted on activate.
+const CACHE = 'recipes-v2';
 
-self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())
-  );
+self.addEventListener('install', () => {
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
   e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', e => {
-  // Network-first for API calls, cache-first for app shell
-  const url = new URL(e.request.url);
-  const isAPI = url.hostname.includes('googleapis') || url.hostname.includes('anthropic');
+  const req = e.request;
+  if (req.method !== 'GET') return;
 
-  if (isAPI) {
-    e.respondWith(fetch(e.request));
-    return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/api/')) return;
+
+  if (url.pathname.startsWith('/assets/')) {
+    e.respondWith(cacheFirst(req));
+  } else {
+    e.respondWith(networkFirst(req));
   }
-
-  e.respondWith(
-    caches.match(e.request).then(cached => {
-      if (cached) return cached;
-      return fetch(e.request).then(res => {
-        if (res.ok) {
-          const clone = res.clone();
-          caches.open(CACHE).then(cache => cache.put(e.request, clone));
-        }
-        return res;
-      });
-    })
-  );
 });
+
+async function cacheFirst(req) {
+  const cached = await caches.match(req);
+  if (cached) return cached;
+  const res = await fetch(req);
+  if (res.ok) {
+    const cache = await caches.open(CACHE);
+    cache.put(req, res.clone());
+  }
+  return res;
+}
+
+async function networkFirst(req) {
+  try {
+    const res = await fetch(req);
+    if (res.ok) {
+      const cache = await caches.open(CACHE);
+      cache.put(req, res.clone());
+    }
+    return res;
+  } catch (err) {
+    const cached = await caches.match(req);
+    if (cached) return cached;
+    // Offline and this exact URL was never cached: fall back to the app shell.
+    if (req.mode === 'navigate') {
+      const shell = await caches.match('/');
+      if (shell) return shell;
+    }
+    throw err;
+  }
+}

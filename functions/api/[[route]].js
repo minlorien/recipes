@@ -109,14 +109,39 @@ async function verifyToken(token, env) {
 }
 
 // ── Anthropic API proxy ────────────────────────────────────────────────────
+// Model and limits are fixed here; the client only supplies system/messages/max_tokens.
+// Swapping models is a one-line change to AI_MODEL.
+const AI_MODEL = 'claude-sonnet-5-5';
+const AI_MAX_TOKENS = 8000;    // hard ceiling; thinking counts toward this too
+const AI_DEFAULT_TOKENS = 2000;
+
 async function handleAI(request, env) {
-  const body = await request.json();
+  const { system, messages, max_tokens } = await request.json();
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return new Response(JSON.stringify({ error: { message: 'messages required' } }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  const requested = Number.isInteger(max_tokens) ? max_tokens : AI_DEFAULT_TOKENS;
+  const body = {
+    model: AI_MODEL,
+    max_tokens: Math.min(Math.max(requested, 1), AI_MAX_TOKENS),
+    // Adaptive thinking is on by default; low effort keeps it short (extraction, chat, lists).
+    output_config: { effort: 'low' },
+    // On a safety decline, let the API retry on a fallback model automatically.
+    fallbacks: 'default',
+    messages,
+  };
+  if (system) body.system = system;
+
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': env.ANTHROPIC_API_KEY,
       'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'server-side-fallback-2026-07-01',
     },
     body: JSON.stringify(body),
   });
