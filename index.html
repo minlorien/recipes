@@ -14,6 +14,29 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/src/styles/main.css" />
+  <script>
+    // Self-repair: if the app hasn't started after 10s (e.g. a broken cached file),
+    // clear caches and service workers, then reload — once per session.
+    setTimeout(function () {
+      if (window.__appStarted) return;
+      try {
+        if (sessionStorage.getItem('recovery-reload')) return;
+        sessionStorage.setItem('recovery-reload', '1');
+      } catch (e) { return; }
+      var jobs = [];
+      if ('caches' in window) {
+        jobs.push(caches.keys().then(function (keys) {
+          return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+        }));
+      }
+      if ('serviceWorker' in navigator) {
+        jobs.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+          return Promise.all(regs.map(function (r) { return r.unregister(); }));
+        }));
+      }
+      Promise.all(jobs).catch(function () {}).then(function () { location.reload(); });
+    }, 10000);
+  </script>
 </head>
 <body>
   <div id="app"></div>

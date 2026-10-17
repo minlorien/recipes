@@ -33,7 +33,7 @@ async function callClaude(messages, system, maxTokens = 2000) {
   return text;
 }
 
-export async function extractRecipeFromImage(base64Image, mimeType = 'image/jpeg') {
+export async function extractRecipeFromImage(base64Image) {
   const system = `You are a recipe extraction assistant. Extract all recipe information from the image and return ONLY valid JSON with no extra text or markdown.
 
 Return this exact structure:
@@ -75,7 +75,7 @@ Important rules:
   const text = await callClaude([{
     role: 'user',
     content: [
-      { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64Image } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64Image } },
       { type: 'text', text: `Extract this recipe into JSON format.
 
 IMPORTANT BEFORE YOU START:

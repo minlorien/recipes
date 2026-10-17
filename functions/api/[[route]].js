@@ -123,6 +123,7 @@ async function handleAI(request, env) {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+  fixImageTypes(messages);
   const requested = Number.isInteger(max_tokens) ? max_tokens : AI_DEFAULT_TOKENS;
   const body = {
     model: AI_MODEL,
@@ -146,10 +147,35 @@ async function handleAI(request, env) {
     body: JSON.stringify(body),
   });
   const data = await res.json();
+  if (!res.ok) {
+    console.error('Anthropic error', res.status, JSON.stringify(data.error || data));
+  } else if (data.stop_reason !== 'end_turn') {
+    console.warn('Anthropic stop_reason', data.stop_reason, JSON.stringify(data.stop_details || null));
+  }
+  // The app only needs text. Dropping thinking/fallback blocks also keeps older
+  // cached app versions (which read content[0].text) working.
+  if (Array.isArray(data.content)) {
+    data.content = data.content.filter(b => b.type === 'text');
+  }
   return new Response(JSON.stringify(data), {
     status: res.status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+// The app re-encodes photos as JPEG, but older versions labelled them with the
+// original file type (PNG, HEIC…), which the API rejects. Trust the bytes instead.
+function fixImageTypes(messages) {
+  const SIGNATURES = [['/9j/', 'image/jpeg'], ['iVBOR', 'image/png'], ['R0lG', 'image/gif'], ['UklG', 'image/webp']];
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue;
+    for (const block of msg.content) {
+      const src = block?.type === 'image' ? block.source : null;
+      if (src?.type !== 'base64' || typeof src.data !== 'string') continue;
+      const match = SIGNATURES.find(([prefix]) => src.data.startsWith(prefix));
+      if (match) src.media_type = match[1];
+    }
+  }
 }
 
 // ── Google Sheets read ─────────────────────────────────────────────────────

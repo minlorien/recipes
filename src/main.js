@@ -144,3 +144,7 @@ if (checkAuth()) {
 state.subscribe(() => render());
 render();
 checkSharedImage();
+
+// Tell the self-repair check in index.html that the app started fine.
+window.__appStarted = true;
+try { sessionStorage.removeItem('recovery-reload'); } catch {}

@@ -7,7 +7,8 @@
 // - /api/* and other origins: never touched.
 //
 // Bump CACHE to force old caches to be deleted on activate.
-const CACHE = 'recipes-v2';
+// v3: v2 could cache an HTML fallback page under an /assets/ URL (white screen).
+const CACHE = 'recipes-v3';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -40,7 +41,9 @@ async function cacheFirst(req) {
   const cached = await caches.match(req);
   if (cached) return cached;
   const res = await fetch(req);
-  if (res.ok) {
+  // Never keep an HTML page under an asset URL (a missing file can come back as HTML).
+  const type = res.headers.get('content-type') || '';
+  if (res.ok && !type.includes('text/html')) {
     const cache = await caches.open(CACHE);
     cache.put(req, res.clone());
   }
