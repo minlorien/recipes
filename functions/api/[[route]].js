@@ -128,8 +128,10 @@ function fromB64url(str) {
 // ── Anthropic API proxy ────────────────────────────────────────────────────
 // Model and limits are fixed here; the client only supplies system/messages/
 // max_tokens and optionally a JSON schema for the answer.
-// Swapping models is a one-line change to AI_MODEL.
-const AI_MODEL = 'claude-sonnet-5-5';
+// The model is DEFAULT_AI_MODEL unless the AI_MODEL Cloudflare variable overrides it
+// (change the variable, then redeploy). Do a test scan after any swap: newer models
+// can reject request fields (effort, fallbacks) or change the response shape.
+const DEFAULT_AI_MODEL = 'claude-sonnet-5-5';
 const AI_MAX_TOKENS = 8000;    // hard ceiling; thinking counts toward this too
 const AI_DEFAULT_TOKENS = 2000;
 
@@ -139,9 +141,10 @@ async function handleAI(request, env) {
     return json({ error: { message: 'messages required' } }, 400);
   }
   fixImageTypes(messages);
+  const model = (env.AI_MODEL || '').trim() || DEFAULT_AI_MODEL;
   const requested = Number.isInteger(max_tokens) ? max_tokens : AI_DEFAULT_TOKENS;
   const body = {
-    model: AI_MODEL,
+    model,
     max_tokens: Math.min(Math.max(requested, 1), AI_MAX_TOKENS),
     // Adaptive thinking is on by default; low effort keeps it short (extraction, chat, lists).
     output_config: { effort: 'low' },
@@ -166,8 +169,19 @@ async function handleAI(request, env) {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({ error: { message: `AI service error (${res.status})` } }));
+
+  // A retired or mistyped model comes back as 404 not_found_error. Say so plainly
+  // in the app, and use 410 (not retried by the app) rather than a generic error.
+  if (res.status === 404 && data.error?.type === 'not_found_error') {
+    console.error(`MODEL UNAVAILABLE: "${model}" — set AI_MODEL in Cloudflare or update DEFAULT_AI_MODEL.`,
+      JSON.stringify(data.error));
+    return json({
+      error: { message: 'The recipe assistant needs an update — please tell Bert.', code: 'model_unavailable' },
+    }, 410);
+  }
+
   if (!res.ok) {
-    console.error('Anthropic error', res.status, JSON.stringify(data.error || data));
+    console.error('Anthropic error', res.status, model, JSON.stringify(data.error || data));
   } else if (data.stop_reason !== 'end_turn') {
     console.warn('Anthropic stop_reason', data.stop_reason, JSON.stringify(data.stop_details || null));
   }

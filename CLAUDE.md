@@ -53,6 +53,7 @@ ingredients, steps, notes, image_url, created_at, updated_at, ingredients_de, st
 | `SESSION_SECRET` | function only — signs login tokens (falls back to a value derived from `APP_PASSWORD` if unset) |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | function only (full JSON) |
 | `APP_PASSWORD` | function only |
+| `AI_MODEL` | function only, optional — overrides `DEFAULT_AI_MODEL` in the proxy |
 | `VITE_SHEET_NAME` | browser (`Recipes`, not secret) |
 
 ## Hard rules
@@ -87,6 +88,12 @@ rewritten (network-first pages, cache-first `/assets/*`, never caches HTML as an
 `public/404.html` stops Pages answering missing files with index.html); 30-day signed
 session tokens in localStorage; edits update the existing row (server finds it by id);
 Sheets reads use the service account (`SHEETS_API_KEY` no longer used); icons, cleanup.
+
+Changing the AI model: set `AI_MODEL` in Cloudflare (then push a commit or redeploy so it
+takes effect), or change `DEFAULT_AI_MODEL` in `functions/api/[[route]].js`. Always do a
+test scan afterwards — newer models can reject request fields (`effort`, `fallbacks`) or
+change the response shape. A retired/unknown model makes the proxy return 410 and log
+`MODEL UNAVAILABLE`; the app tells the user to ask Bert.
 
 Gotchas learned:
 - Cloudflare Pages serves index.html (200) for any missing path unless a top-level
