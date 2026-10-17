@@ -230,7 +230,7 @@ label { font-size: 0.82rem; font-weight: 500; color: var(--ink-muted); display: 
   cursor: pointer;
 }
 .shopping-item:last-child { border-bottom: none; }
-.shopping-item input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--forest); flex-shrink: 0; cursor: pointer; }
+.shopping-item input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--forest); flex-shrink: 0; cursor: pointer; }
 .shopping-item .item-text { flex: 1; font-size: 0.95rem; }
 .shopping-item .item-text.checked { text-decoration: line-through; color: var(--ink-faint); }
 .shopping-item .item-amount { font-size: 0.85rem; color: var(--forest); font-weight: 500; }

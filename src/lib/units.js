@@ -66,6 +66,8 @@ function formatCups(cups) {
 
 export function toImperial(amount, unit) {
   if (!amount || !unit) return null;
+  // Litres use the same tsp/tbsp/cup/qt ladder as millilitres.
+  if (unit.toLowerCase() === 'l') return toImperial(amount * 1000, 'ml');
   const conv = CONVERSIONS[unit.toLowerCase()];
   if (!conv) return null;
 
@@ -105,7 +107,7 @@ export function toImperial(amount, unit) {
     return `${roundNice(tsp)} tsp`;
   }
 
-  // Litres → quarts
+  // Everything else (kg → lb, cm → in, …)
   return `${roundNice(converted)} ${conv.to}`;
 }
 
@@ -142,7 +144,8 @@ export function mergeIngredients(recipeIngredientLists) {
   for (const { recipe, ingredients, servings, baseServings } of recipeIngredientLists) {
     const scale = servings / (baseServings || servings);
     for (const ing of ingredients) {
-      const key = ing.name.toLowerCase().trim();
+      // Only add up amounts that share a unit ("2 pcs" + "100 g" eggs stay separate).
+      const key = `${ing.name.toLowerCase().trim()}|${(ing.unit || '').toLowerCase()}`;
       if (!merged[key]) {
         merged[key] = { name: ing.name, unit: ing.unit, totalAmount: 0, recipes: [] };
       }
@@ -152,8 +155,9 @@ export function mergeIngredients(recipeIngredientLists) {
       }
     }
   }
-  return Object.values(merged).map(m => ({
+  return Object.entries(merged).map(([key, m]) => ({
     ...m,
+    key,
     ...formatAmount(m.totalAmount, m.unit),
   }));
 }

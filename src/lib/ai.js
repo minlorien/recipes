@@ -1,110 +1,116 @@
-import { CONFIG } from '../config.js';
-import { getToken } from './state.js';
+import { postJSON } from './api.js';
 
 // The model is chosen server-side in functions/api/[[route]].js.
-async function callClaude(messages, system, maxTokens = 2000) {
-  const res = await fetch(`${CONFIG.API_BASE}/ai`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-session-token': getToken() || '' },
-    body: JSON.stringify({
-      max_tokens: maxTokens,
-      system,
-      messages,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    const msg = typeof err.error === 'string' ? err.error : err.error?.message;
-    throw new Error(msg || 'AI request failed');
-  }
-  const data = await res.json();
+// Pass `schema` to get an answer that is guaranteed to be JSON matching it.
+async function callClaude(messages, system, maxTokens = 2000, schema = null) {
+  const body = { max_tokens: maxTokens, system, messages };
+  if (schema) body.schema = schema;
+  const data = await postJSON('/ai', body, { retry: true });
+
   if (data.stop_reason === 'refusal') {
     throw new Error('The assistant could not help with this request.');
   }
   if (data.stop_reason === 'max_tokens') {
     throw new Error('The answer was too long and got cut off. Please try again.');
   }
-  // Responses can start with a thinking block — collect only the text blocks.
+  // Only text blocks are useful here (the server already drops the rest).
   const text = (data.content || [])
     .filter(b => b.type === 'text')
     .map(b => b.text)
     .join('');
-  if (!text) throw new Error('AI returned an empty answer');
+  if (!text) throw new Error('The assistant returned an empty answer. Please try again.');
   return text;
 }
 
-export async function extractRecipeFromImage(base64Image) {
-  const system = `You are a recipe extraction assistant. Extract all recipe information from the image and return ONLY valid JSON with no extra text or markdown.
-
-Return this exact structure:
-{
-  "title": "Recipe name in English",
-  "title_de": "Recipe name in German (translate if needed, or original if German)",
-  "language": "en or de (detected language of the original)",
-  "category": "one of: Breakfast, Soup, Salad, Main, Side, Dessert, Baking, Drink, Snack, Preserve",
-  "servings": 4,
-  "prep_mins": 15,
-  "cook_mins": 30,
-  "rating": 0,
-  "tags": ["tag1", "tag2"],
-  "notes": "any notes or tips",
-  "ingredients": [
-    { "name": "ingredient name in English", "amount": 250, "unit": "g", "notes": "optional prep note" }
-  ],
-  "ingredients_de": [
-    { "name": "Zutatenname auf Deutsch", "amount": 250, "unit": "g", "notes": "optionale Notiz" }
-  ],
-  "steps": ["Step 1 text in English", "Step 2 text in English"],
-  "steps_de": ["Schritt 1 auf Deutsch", "Schritt 2 auf Deutsch"]
-}
-
-Important rules:
-- Convert ALL amounts to metric (g, ml, kg, l, C, cm). Store only metric.
-- For uncountable items use amount: 0 and unit: "".
-- For items measured in pieces use unit: "pcs".
-- Infer category from the recipe type.
-- Tags should be descriptive: e.g. vegetarian, quick, family-favourite, Christmas, etc.
-- CRITICAL: Always provide BOTH ingredients AND ingredients_de, and BOTH steps AND steps_de. Never leave these empty.
-- If recipe is in German, ingredients_de/steps_de are originals; ingredients/steps are English translations.
-- If recipe is in English, ingredients/steps are originals; ingredients_de/steps_de are German translations.
-- The image may be rotated or upside down - carefully orient it correctly before reading.
-- Steps must be in correct sequential order. Step 1 comes first.
-- For handwritten recipes, read each word carefully.
-- If a letter-grade rating is visible (A, B+, A-), convert to stars: A=5, B+=4, B=3, C=2.`;
-
-  const text = await callClaude([{
-    role: 'user',
-    content: [
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64Image } },
-      { type: 'text', text: `Extract this recipe into JSON format.
-
-IMPORTANT BEFORE YOU START:
-1. Determine correct orientation - may be rotated 90, 180 degrees or upside down.
-2. Extract steps in correct sequential order (step 1 first).
-3. Always provide German translations in ingredients_de and steps_de - mandatory.
-4. For handwritten recipes, read carefully character by character.
-5. Do not confuse similar letters (K vs W, H vs B, u vs n).` }
-    ]
-  }], system, 8000);
-
-  let clean = text.replace(/\`\`\`json\n?|\n?\`\`\`/g, '').trim();
-  const jsonMatch = clean.match(/\{[\s\S]*\}/);
-  if (jsonMatch) clean = jsonMatch[0];
+async function callClaudeJSON(messages, system, maxTokens, schema) {
+  const text = await callClaude(messages, system, maxTokens, schema);
   try {
-    return JSON.parse(clean);
-  } catch (e) {
-    console.error('Failed to parse AI response:', clean);
-    throw new Error('Could not parse recipe: ' + e.message);
+    return JSON.parse(text);
+  } catch {
+    console.error('Failed to parse AI response:', text);
+    throw new Error('The assistant gave an unreadable answer. Please try again.');
   }
 }
 
+// ── JSON schemas (structured outputs: every object needs additionalProperties:false) ──
+const str = { type: 'string' };
+const strList = { type: 'array', items: str };
+
+function obj(properties) {
+  return { type: 'object', properties, required: Object.keys(properties), additionalProperties: false };
+}
+
+const INGREDIENT = obj({ name: str, amount: { type: 'number' }, unit: str, notes: str });
+
+const RECIPE_SCHEMA = obj({
+  title: str,
+  title_de: str,
+  language: { type: 'string', enum: ['en', 'de'] },
+  category: { type: 'string', enum: ['Breakfast', 'Soup', 'Salad', 'Main', 'Side', 'Dessert', 'Baking', 'Drink', 'Snack', 'Preserve'] },
+  servings: { type: 'integer' },
+  prep_mins: { type: 'integer' },
+  cook_mins: { type: 'integer' },
+  rating: { type: 'number' },
+  tags: strList,
+  notes: str,
+  ingredients: { type: 'array', items: INGREDIENT },
+  ingredients_de: { type: 'array', items: INGREDIENT },
+  steps: strList,
+  steps_de: strList,
+});
+
+const SUGGESTIONS_SCHEMA = obj({ suggestions: strList, reason: str });
+
+const MENU_SCHEMA = obj({
+  menu: { type: 'array', items: obj({ day: str, title: str, reason: str }) },
+  note: str,
+});
+
+const FRIDGE_SCHEMA = obj({
+  matches: { type: 'array', items: obj({ title: str, match: { type: 'string', enum: ['full', 'partial'] }, missing: strList }) },
+  suggestion: str,
+});
+
+// ── Photo → recipe ─────────────────────────────────────────────────────────
+export async function extractRecipeFromImage(base64Image) {
+  const system = `You are a recipe extraction assistant. Extract all recipe information from the photo of a recipe.
+
+Field guide:
+- title / title_de: recipe name in English / German (translate if needed, or the original if already in that language).
+- language: "en" or "de", the language of the original.
+- category: infer from the recipe type.
+- rating: 0 unless a rating is visible. Convert letter grades to stars: A=5, B+=4, B=3, C=2.
+- tags: descriptive, e.g. vegetarian, quick, family-favourite, Christmas.
+- notes: any notes or tips on the page, otherwise "".
+
+Rules:
+- Convert ALL amounts to metric (g, ml, kg, l, °C, cm). Store only metric.
+- For uncountable items (e.g. "salt to taste") use amount 0 and unit "".
+- For items counted in pieces use unit "pcs".
+- Ingredient notes hold preparation hints such as "finely chopped", otherwise "".
+- Always fill BOTH ingredients and ingredients_de, and BOTH steps and steps_de, with the same items in the same order.
+- If the recipe is in German, ingredients_de/steps_de are the originals and ingredients/steps are English translations; if it is in English, the other way round.
+- The photo may be rotated or upside down: work out the correct orientation before reading.
+- Steps must be in their original order, step 1 first.
+- For handwriting, read each word carefully and don't confuse similar letters (K/W, H/B, u/n).`;
+
+  return callClaudeJSON([{
+    role: 'user',
+    content: [
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64Image } },
+      { type: 'text', text: 'Extract this recipe.' },
+    ],
+  }], system, 8000, RECIPE_SCHEMA);
+}
+
+// ── "You might also like" ──────────────────────────────────────────────────
 export async function getSuggestions(currentRecipe, allRecipes) {
   const titles = allRecipes
     .filter(r => r.id !== currentRecipe.id)
     .map(r => `${r.title} (${r.category}, rated ${r.rating}/5, tags: ${r.tags?.join(', ')})`)
     .slice(0, 60).join('\n');
 
-  const system = 'You are a helpful recipe assistant. Return ONLY valid JSON, no markdown.';
+  const system = 'You are a helpful recipe assistant.';
   const prompt = `Given this recipe:
 Title: ${currentRecipe.title}
 Category: ${currentRecipe.category}
@@ -114,63 +120,59 @@ Ingredients: ${currentRecipe.ingredients?.map(i => i.name).join(', ')}
 From this collection:
 ${titles}
 
-Return JSON: { "suggestions": ["title1", "title2", "title3"], "reason": "brief friendly explanation" }`;
+Pick up to 3 recipes from the collection that go well with it or that someone who likes it would enjoy. Use the exact titles from the collection. "reason" is one brief, friendly sentence.`;
 
-  const text = await callClaude([{ role: 'user', content: prompt }], system, 1000);
-  const clean = text.replace(/\`\`\`json\n?|\n?\`\`\`/g, '').trim();
-  return JSON.parse(clean);
+  return callClaudeJSON([{ role: 'user', content: prompt }], system, 1000, SUGGESTIONS_SCHEMA);
 }
 
+// ── Weekly menu ────────────────────────────────────────────────────────────
 export async function suggestWeeklyMenu(recipes) {
   const options = recipes
     .filter(r => r.category === 'Main' || r.category === 'Soup' || r.category === 'Salad')
     .map(r => `${r.title} (${r.category}, rated ${r.rating}/5, tags: ${r.tags?.join(', ')})`).join('\n');
 
-  const system = 'You are a helpful meal planning assistant. Return ONLY valid JSON, no markdown.';
-  const prompt = `Suggest a balanced weekly dinner menu (7 meals) from this collection.
-Prioritize high-rated recipes and variety.
+  const system = 'You are a helpful meal planning assistant.';
+  const prompt = `Suggest a balanced weekly dinner menu (Monday to Sunday, 7 meals) from this collection.
+Prioritize high-rated recipes and variety. Use the exact titles from the collection.
+"reason" is a few words per day; "note" is one practical tip.
 
 Available recipes:
-${options}
+${options}`;
 
-Return JSON: { "menu": [{ "day": "Monday", "title": "recipe title", "reason": "brief reason" }], "note": "tip" }`;
-
-  const text = await callClaude([{ role: 'user', content: prompt }], system, 2000);
-  const clean = text.replace(/\`\`\`json\n?|\n?\`\`\`/g, '').trim();
-  return JSON.parse(clean);
+  return callClaudeJSON([{ role: 'user', content: prompt }], system, 2000, MENU_SCHEMA);
 }
 
+// ── Fridge mode ────────────────────────────────────────────────────────────
 export async function findRecipesFromIngredients(haveIngredients, recipes) {
   const catalog = recipes.map(r => ({
     title: r.title,
     ingredients: r.ingredients?.map(i => i.name).join(', ')
   }));
 
-  const system = 'You are a helpful cooking assistant. Return ONLY valid JSON, no markdown.';
+  const system = 'You are a helpful cooking assistant.';
   const prompt = `I have: ${haveIngredients.join(', ')}
 
 Recipes:
 ${catalog.map(r => `- ${r.title}: needs ${r.ingredients}`).join('\n')}
 
-Which can I make? Return JSON: { "matches": [{ "title": "title", "match": "full or partial", "missing": ["item"] }], "suggestion": "tip" }
-Sort by best match. Max 6 results.`;
+Which of these recipes can I make? Assume basic pantry staples (salt, pepper, oil, water) are available.
+Sort by best match, at most 6 results, exact titles from the list. "suggestion" is one short tip.`;
 
-  const text = await callClaude([{ role: 'user', content: prompt }], system, 1500);
-  const clean = text.replace(/\`\`\`json\n?|\n?\`\`\`/g, '').trim();
-  return JSON.parse(clean);
+  return callClaudeJSON([{ role: 'user', content: prompt }], system, 1500, FRIDGE_SCHEMA);
 }
 
+// ── Chat ───────────────────────────────────────────────────────────────────
 export async function chatAboutRecipes(messages, recipes) {
   const catalog = recipes.map(r =>
     `${r.title} | ${r.category} | Rating: ${r.rating}/5 | Tags: ${r.tags?.join(', ')} | Ingredients: ${r.ingredients?.map(i=>i.name).join(', ')}`
   ).join('\n');
 
-  const system = `You are a warm, knowledgeable cooking assistant for a family recipe collection. Help find recipes, suggest modifications, answer cooking questions. Keep responses concise and friendly.
+  const system = `You are a warm, knowledgeable cooking assistant for a family recipe collection. Help find recipes, suggest modifications, answer cooking questions. Keep responses concise and friendly, in plain text (no markdown headings or tables; **bold** is fine).
 
 Collection:
 ${catalog}
 
-When referring to a recipe, wrap its title in [[double brackets]].`;
+When referring to a recipe from the collection, wrap its exact title in [[double brackets]].`;
 
   return callClaude(messages, system, 1500);
 }

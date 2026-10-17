@@ -1,5 +1,5 @@
 import { CONFIG } from '../config.js';
-import { getToken } from './state.js';
+import { postJSON } from './api.js';
 
 export const COLUMNS = ['id','title','title_de','category','servings','prep_mins',
   'cook_mins','rating','language','tags','ingredients','steps','notes','image_url',
@@ -43,51 +43,20 @@ function recipeToRow(recipe) {
   ];
 }
 
-function authHeaders() {
-  return { 'Content-Type': 'application/json', 'x-session-token': getToken() || '' };
-}
-
 export async function fetchRecipes() {
-  const res = await fetch(`${CONFIG.API_BASE}/sheets/read`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ range: `${CONFIG.SHEET_NAME}!A2:R` }),
-  });
-  if (!res.ok) throw new Error('Failed to fetch recipes');
-  const data = await res.json();
+  const data = await postJSON('/sheets/read', { range: `${CONFIG.SHEET_NAME}!A2:R` });
   return (data.values || []).map(rowToRecipe).filter(r => r.id);
 }
 
 export async function appendRecipe(recipe) {
   const row = recipeToRow(recipe);
-  const res = await fetch(`${CONFIG.API_BASE}/sheets/write`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ range: `${CONFIG.SHEET_NAME}!A:R`, values: [row], mode: 'append' }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error('Failed to save recipe: ' + (err.error?.message || res.status));
-  }
+  await postJSON('/sheets/write', { range: `${CONFIG.SHEET_NAME}!A:R`, values: [row], mode: 'append' });
   return recipe;
 }
 
-export async function updateRecipe(recipe, rowIndex) {
+// The server finds the row by recipe id, so a stale row number can't overwrite another recipe.
+export async function updateRecipe(recipe) {
   const row = recipeToRow(recipe);
-  const res = await fetch(`${CONFIG.API_BASE}/sheets/write`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ range: `${CONFIG.SHEET_NAME}!A${rowIndex}:R${rowIndex}`, values: [row], mode: 'update' }),
-  });
-  if (!res.ok) throw new Error('Failed to update recipe');
+  await postJSON('/sheets/write', { range: `${CONFIG.SHEET_NAME}!A:R`, values: [row], mode: 'update', id: recipe.id });
   return recipe;
-}
-
-export async function deleteRecipe(rowIndex) {
-  const res = await fetch(`${CONFIG.API_BASE}/sheets/delete`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ rowIndex }),
-  });
-  if (!res.ok) throw new Error('Failed to delete recipe');
 }

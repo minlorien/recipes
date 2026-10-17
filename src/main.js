@@ -19,8 +19,12 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
 }
 
-// ── Toast container ────────────────────────────────────────────────────────
-document.getElementById('app').insertAdjacentHTML('beforeend', `<div id="toast-container"></div>`);
+// ── Session expiry (any API call that gets a 401) ──────────────────────────
+window.addEventListener('auth-expired', () => {
+  if (!state.get('authenticated')) return;
+  logout();
+  toast('Please sign in again.', 'error');
+});
 
 // ── Router ─────────────────────────────────────────────────────────────────
 function render() {
@@ -28,7 +32,8 @@ function render() {
   const authenticated = state.get('authenticated');
 
   if (!authenticated) {
-    renderLogin(app);
+    // Don't wipe the login form (and what's typed in it) on unrelated state changes.
+    if (!app.querySelector('.login-page')) renderLogin(app);
     return;
   }
 
@@ -37,15 +42,15 @@ function render() {
 
   app.innerHTML = `
     <nav class="top-nav">
-      <a class="logo" href="#">Recipes</a>
+      <a class="logo" href="#" id="logo-link">Recipes</a>
       <div class="nav-actions">
         ${page === 'detail' || page === 'scan' ? '' : `
-          <button class="btn btn-ghost btn-sm" id="refresh-btn" title="Refresh">${icons.refresh}</button>
+          <button class="btn btn-ghost btn-sm" id="refresh-btn" title="Refresh" aria-label="Refresh recipes">${icons.refresh}</button>
         `}
         <button class="btn btn-outline btn-sm" id="lang-btn" title="Toggle language" style="font-weight:500;min-width:36px;">
           ${state.get('displayLang') === 'en' ? 'DE' : 'EN'}
         </button>
-        <button class="btn btn-ghost btn-sm" id="logout-btn" title="Sign out" style="font-size:1.1rem;">⎋</button>
+        <button class="btn btn-ghost btn-sm" id="logout-btn" title="Sign out" aria-label="Sign out" style="font-size:1.1rem;">⎋</button>
       </div>
     </nav>
 
@@ -69,13 +74,15 @@ function render() {
         Ask AI
       </button>
     </nav>
-
-    <div id="toast-container"></div>
   `;
 
   // Nav
   app.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => state.navigate(btn.dataset.page));
+  });
+  app.querySelector('#logo-link')?.addEventListener('click', e => {
+    e.preventDefault();
+    state.navigate('recipes');
   });
   app.querySelector('#lang-btn')?.addEventListener('click', () => {
     state.toggleLang();
@@ -84,8 +91,9 @@ function render() {
   app.querySelector('#logout-btn')?.addEventListener('click', () => {
     if (window.confirm('Sign out?')) logout();
   });
-  app.querySelector('#refresh-btn')?.addEventListener('click', () => {
-    loadRecipes().then(() => toast('Recipes refreshed', 'success'));
+  app.querySelector('#refresh-btn')?.addEventListener('click', async () => {
+    if (await loadRecipes()) toast('Recipes refreshed', 'success');
+    else toast('Could not refresh — check your connection', 'error');
   });
 
   // Page content
@@ -104,34 +112,42 @@ function render() {
 function renderLogin(app) {
   app.innerHTML = `
     <div class="login-page">
-      <div class="login-card">
+      <form class="login-card" id="login-form">
         <div class="login-logo">Recipes</div>
         <div class="login-sub">Our family recipe collection</div>
         <div class="form-group mb-16">
-          <label>Password</label>
+          <label for="pw-input">Password</label>
           <input type="password" id="pw-input" placeholder="Enter family password" autocomplete="current-password" />
         </div>
-        <button class="btn btn-primary w-full btn-lg" id="login-btn">Enter Kitchen</button>
+        <button type="submit" class="btn btn-primary w-full btn-lg" id="login-btn">Enter Kitchen</button>
         <p class="text-center text-muted text-sm mt-16" style="font-style:italic;">
           recipes.minlorien.net
         </p>
-      </div>
+      </form>
     </div>
-    <div id="toast-container"></div>
   `;
 
+  const form = document.getElementById('login-form');
   const input = document.getElementById('pw-input');
   const btn = document.getElementById('login-btn');
 
-  const attempt = () => {
-    if (!login(input.value)) {
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    if (btn.disabled || !input.value) return;
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+    const result = await login(input.value);
+    if (result === 'ok') return; // state change renders the app
+    btn.disabled = false;
+    btn.textContent = 'Enter Kitchen';
+    if (result === 'wrong-password') {
       toast('Incorrect password', 'error');
       input.value = '';
-      input.focus();
+    } else {
+      toast('Could not connect — check your internet and try again', 'error');
     }
-  };
-  btn.addEventListener('click', attempt);
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
+    input.focus();
+  });
   input.focus();
 }
 

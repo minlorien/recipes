@@ -50,7 +50,7 @@ ingredients, steps, notes, image_url, created_at, updated_at, ingredients_de, st
 |---|---|
 | `ANTHROPIC_API_KEY` | function only |
 | `SHEETS_ID` | function only |
-| `SHEETS_API_KEY` | function only |
+| `SESSION_SECRET` | function only — signs login tokens (falls back to a value derived from `APP_PASSWORD` if unset) |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | function only (full JSON) |
 | `APP_PASSWORD` | function only |
 | `VITE_SHEET_NAME` | browser (`Recipes`, not secret) |
@@ -79,42 +79,29 @@ git push                          # Cloudflare auto-deploys from main
 - Verify the function was picked up: build log must NOT say
   "No functions dir at /functions found".
 
-## Current state (Oct 2026) — work these first
+## Current state (Oct 2026)
 
-1. **AI is broken: retired model.** `src/lib/ai.js` sends `model: 'claude-sonnet-4-20250514'`,
-   retired 2026-06-15. Replacement per Anthropic: `claude-sonnet-5-5`. Better: set the model
-   **server-side** in `functions/api/[[route]].js` (ignore whatever the client sends, also
-   clamp `max_tokens`), so the proxy can't be used for arbitrary models and future swaps
-   are a one-line server change. Recipe extraction needs ~4000 max_tokens (long
-   bilingual JSON got truncated at 3000). Check the migration guide for request-shape
-   changes (e.g. `temperature`/`top_p` are rejected on newer models — we don't send them).
-2. **Stale PWA on phones — root cause found.** `public/sw.js` precaches `/src/...` paths
-   that don't exist in the built `dist/`, so `cache.addAll` rejects, the new service worker
-   never installs, and the old one keeps serving cache-first forever. Fix: precache only
-   real built assets (or nothing), use network-first for HTML/navigation, bump `CACHE`
-   name, and never cache `/api/*`. Consider a self-unregistering SW first to free stuck phones.
-3. **Login handler not awaited.** `src/main.js` `attempt()` does `if (!login(...))` on a
-   Promise, so wrong passwords never show an error. Make it async/await with a
-   "Checking…" button state.
-4. **Session token expires at midnight UTC.** `verifyToken` comment says it accepts
-   yesterday's token, but it only checks today's. Accept both, or use an expiring signed
-   token. Also the HMAC secret is derived from `APP_PASSWORD`; prefer a separate
-   `SESSION_SECRET` env var.
-5. **Clean-up:** delete stray duplicate `src/functions/api/[[route]].js`; fix or delete
-   `wrangler.toml` (Pages warns it's invalid — needs `pages_build_output_dir = "dist"` or
-   just remove it); add `public/icons/icon-192.png` and `icon-512.png` (manifest references
-   them); add `<meta name="mobile-web-app-capable">`; CORS `*` on the proxy is unnecessary
-   (same-origin) — remove or restrict.
-6. **Possible improvement:** sheet is shared "anyone with link — viewer" only so the
-   API-key read works. Reading via the service account instead would let the sheet be
-   private; then `SHEETS_API_KEY` can be dropped.
-7. **Scanning reliability:** occasional JSON parse errors. Consider structured outputs /
-   a JSON-only response format, one automatic retry, and a clear user message.
-   Photo guidance for users: portrait mode, page right-side up, phone directly above.
+Done: AI moved to `claude-sonnet-5-5` with the model pinned server-side (effort `low`,
+structured outputs via an optional `schema`, `max_tokens` clamped to 8000); service worker
+rewritten (network-first pages, cache-first `/assets/*`, never caches HTML as an asset,
+`public/404.html` stops Pages answering missing files with index.html); 30-day signed
+session tokens in localStorage; edits update the existing row (server finds it by id);
+Sheets reads use the service account (`SHEETS_API_KEY` no longer used); icons, cleanup.
+
+Gotchas learned:
+- Cloudflare Pages serves index.html (200) for any missing path unless a top-level
+  `404.html` exists. Keep `public/404.html`.
+- Sonnet 5.5 responses can start with a `thinking` block: read text blocks by type.
+- Upstream 401/403 (bad Anthropic/Google key) are returned as 502 so the app doesn't log
+  the user out.
+
+Open:
+- Editing English ingredients/steps doesn't update `ingredients_de`/`steps_de`.
+- Sheet can now be made private (service account is Editor), then delete `SHEETS_API_KEY`.
 
 ## Testing
 
 No test suite. Minimum before pushing: `npm run build` passes; `npx wrangler pages dev dist`
-(with a local `.dev.vars` holding the secrets — gitignored) to exercise `/api/*`; login,
+(with a local `.dev.vars` holding the secrets — gitignored; fake values are fine for UI work) to exercise `/api/*`; login,
 list, open a recipe, toggle DE/EN, add to shopping list, scan one photo, save, confirm the
 row (incl. `ingredients_de`/`steps_de`) lands in the sheet.

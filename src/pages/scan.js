@@ -1,9 +1,14 @@
 import { state, loadRecipes } from '../lib/state.js';
-import { icons, toast, fileToBase64, starsHTML } from '../lib/ui.js';
+import { icons, toast, fileToBase64, starsHTML, esc } from '../lib/ui.js';
 import { extractRecipeFromImage } from '../lib/ai.js';
 import { appendRecipe, updateRecipe } from '../lib/sheets.js';
 
 const CATEGORIES = ['Breakfast','Soup','Salad','Main','Side','Dessert','Baking','Drink','Snack','Preserve'];
+
+// Survives re-renders (background refresh, EN/DE toggle) so a scan or a
+// half-filled form is never lost. Cleared on save or cancel.
+let draft = null;       // { recipe, isEdit }
+let scanning = false;   // a photo is being read
 
 export async function checkSharedImage() {
   if ('launchQueue' in window) {
@@ -11,42 +16,63 @@ export async function checkSharedImage() {
       if (!launchParams.files?.length) return;
       const file = await launchParams.files[0].getFile();
       if (file.type.startsWith('image/')) {
-        const { state } = await import('../lib/state.js');
         state.navigate('scan');
-        setTimeout(() => handleSharedFile(file), 300);
+        scanFile(file);
       }
     });
   }
 }
 
-async function handleSharedFile(file) {
-  const zone = document.getElementById('upload-zone');
-  const processing = document.getElementById('processing');
-  const manualBtn = document.getElementById('manual-btn');
-  if (!zone || !processing) return;
+// Navigate to the scan page with an existing recipe in the form.
+export function openEditModal(recipe) {
+  draft = { recipe: structuredClone(recipe), isEdit: true };
+  state.navigate('scan');
+}
 
-  zone.classList.add('hidden');
-  if (manualBtn) manualBtn.classList.add('hidden');
-  processing.classList.remove('hidden');
-
+async function scanFile(file) {
+  if (!file || scanning) return;
+  scanning = true;
+  draft = null;
+  rerender();
   try {
-    const { fileToBase64 } = await import('../lib/ui.js');
-    const { extractRecipeFromImage } = await import('../lib/ai.js');
     const base64 = await fileToBase64(file);
-    const recipe = await extractRecipeFromImage(base64, file.type);
+    const recipe = await extractRecipeFromImage(base64);
     recipe.id = crypto.randomUUID();
-    processing.classList.add('hidden');
-    const container = document.getElementById('page-content');
-    showRecipeForm(recipe, container);
+    draft = { recipe, isEdit: false };
   } catch (err) {
-    if (processing) processing.classList.add('hidden');
-    if (zone) zone.classList.remove('hidden');
-    const { toast } = await import('../lib/ui.js');
     toast('Could not read recipe: ' + err.message, 'error');
+  } finally {
+    scanning = false;
+    rerender();
   }
 }
 
+// Re-draw the scan page if it is the one showing.
+function rerender() {
+  const container = document.getElementById('page-content');
+  if (container && state.get('currentPage') === 'scan') renderScanPage(container);
+}
+
 export function renderScanPage(container) {
+  if (draft) {
+    container.innerHTML = `<div class="page" id="recipe-form-area"></div>`;
+    showRecipeForm(container.querySelector('#recipe-form-area'));
+    return;
+  }
+
+  if (scanning) {
+    container.innerHTML = `
+      <div class="page">
+        <div style="text-align:center;padding:48px 0;">
+          <div class="spinner" style="margin:0 auto 16px;width:36px;height:36px;border-width:3px;"></div>
+          <h2 style="font-style:italic;">Reading recipe…</h2>
+          <p class="text-muted mt-8">This can take up to a minute.</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
   container.innerHTML = `
     <div class="page">
       <h2 style="font-style:italic;margin-bottom:6px;">Add a Recipe</h2>
@@ -57,6 +83,7 @@ export function renderScanPage(container) {
         <div class="upload-icon">📷</div>
         <p><strong>Take a photo</strong> of the recipe page<br>
         or tap to choose an image from your library</p>
+        <p class="text-muted text-sm mt-8">Tip: hold the phone straight above the page,<br>page the right way up, in good light.</p>
         <br>
         <button class="btn btn-primary" id="camera-btn">${icons.scan} Scan Recipe</button>
       </div>
@@ -70,106 +97,63 @@ export function renderScanPage(container) {
       <button class="btn btn-outline w-full" id="manual-btn">
         ${icons.edit} Enter Recipe Manually
       </button>
-
-      <!-- Processing overlay -->
-      <div id="processing" class="hidden" style="text-align:center;padding:48px 0;">
-        <div class="spinner" style="margin:0 auto 16px;width:36px;height:36px;border-width:3px;"></div>
-        <h2 style="font-style:italic;">Reading recipe…</h2>
-        <p class="text-muted mt-8">AI is extracting ingredients and steps</p>
-      </div>
-
-      <!-- Edit form (hidden until recipe loaded) -->
-      <div id="recipe-form-area" class="hidden mt-20"></div>
     </div>
   `;
 
-  const zone = document.getElementById('upload-zone');
-  const fileInput = document.getElementById('file-input');
+  const zone = container.querySelector('#upload-zone');
+  const fileInput = container.querySelector('#file-input');
 
-  document.getElementById('camera-btn').addEventListener('click', () => fileInput.click());
-  zone.addEventListener('click', e => { if (e.target !== document.getElementById('camera-btn')) fileInput.click(); });
+  zone.addEventListener('click', e => {
+    if (e.target !== fileInput) fileInput.click();
+  });
 
-  // Drag & drop
+  // Drag & drop (desktop)
   zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0]); });
+  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); scanFile(e.dataTransfer.files[0]); });
 
-  fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
-  document.getElementById('manual-btn').addEventListener('click', () => showRecipeForm(null, container));
-
-  async function handleFile(file) {
-    if (!file) return;
-    zone.classList.add('hidden');
-    document.getElementById('manual-btn').closest('.flex')?.classList.add('hidden');
-    document.getElementById('manual-btn').classList.add('hidden');
-    document.getElementById('processing').classList.remove('hidden');
-
-    try {
-      const base64 = await fileToBase64(file);
-      const recipe = await extractRecipeFromImage(base64, file.type);
-      recipe.id = crypto.randomUUID();
-      document.getElementById('processing').classList.add('hidden');
-      showRecipeForm(recipe, container);
-    } catch (err) {
-      document.getElementById('processing').classList.add('hidden');
-      zone.classList.remove('hidden');
-      document.getElementById('manual-btn').classList.remove('hidden');
-      toast('Could not read recipe: ' + err.message, 'error');
-    }
-  }
+  fileInput.addEventListener('change', e => scanFile(e.target.files[0]));
+  container.querySelector('#manual-btn').addEventListener('click', () => {
+    draft = { recipe: emptyRecipe(), isEdit: false };
+    rerender();
+  });
 }
 
-export function openEditModal(recipe) {
-  // Navigate to scan page in edit mode
-  state.navigate('scan');
-  setTimeout(() => {
-    const area = document.getElementById('recipe-form-area');
-    const zone = document.getElementById('upload-zone');
-    const manualBtn = document.getElementById('manual-btn');
-    if (area && zone && manualBtn) {
-      zone.classList.add('hidden');
-      manualBtn.closest('.flex')?.classList.add('hidden');
-      manualBtn.classList.add('hidden');
-      area.classList.remove('hidden');
-      showRecipeForm(recipe, document.querySelector('.page')?.parentElement);
-    }
-  }, 100);
+function emptyRecipe() {
+  return {
+    id: crypto.randomUUID(), title: '', title_de: '', category: '', servings: 4, prep_mins: 0,
+    cook_mins: 0, rating: 0, tags: [], ingredients: [], steps: [], notes: '', language: 'en',
+  };
 }
 
-function showRecipeForm(recipe, container) {
-  const formArea = document.getElementById('recipe-form-area');
-  if (!formArea) return;
-  formArea.classList.remove('hidden');
-
-  const isEdit = !!(recipe?.id && state.get('recipes').find(r => r.id === recipe.id));
-  const r = recipe || { title: '', category: '', servings: 4, prep_mins: 0, cook_mins: 0, rating: 0, tags: [], ingredients: [], steps: [], notes: '', language: 'en' };
+function showRecipeForm(formArea) {
+  const { recipe: r, isEdit } = draft;
+  const hasGerman = r.ingredients_de?.length || r.steps_de?.length;
 
   formArea.innerHTML = `
     <h2 style="font-style:italic;margin-bottom:20px;">${isEdit ? 'Edit Recipe' : 'Review & Save'}</h2>
 
-    <div class="flex flex-col gap-16">
+    <div class="flex flex-col gap-16" id="recipe-form">
       <div class="form-group">
-        <label>Title (English)</label>
+        <label for="f-title">Title (English)</label>
         <input type="text" id="f-title" value="${esc(r.title)}" placeholder="Recipe name" />
       </div>
 
-      ${r.language === 'de' || r.title_de ? `
-        <div class="form-group">
-          <label>Title (German)</label>
-          <input type="text" id="f-title-de" value="${esc(r.title_de || '')}" placeholder="Rezeptname" />
-        </div>
-      ` : ''}
+      <div class="form-group">
+        <label for="f-title-de">Title (German)</label>
+        <input type="text" id="f-title-de" value="${esc(r.title_de)}" placeholder="Rezeptname" />
+      </div>
 
       <div class="form-row">
         <div class="form-group">
-          <label>Category</label>
+          <label for="f-category">Category</label>
           <select id="f-category">
             <option value="">— select —</option>
             ${CATEGORIES.map(c => `<option value="${c}" ${r.category === c ? 'selected' : ''}>${c}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
-          <label>Language</label>
+          <label for="f-language">Language</label>
           <select id="f-language">
             <option value="en" ${r.language !== 'de' ? 'selected' : ''}>English</option>
             <option value="de" ${r.language === 'de' ? 'selected' : ''}>German</option>
@@ -179,19 +163,19 @@ function showRecipeForm(recipe, container) {
 
       <div class="form-row">
         <div class="form-group">
-          <label>Servings</label>
-          <input type="number" id="f-servings" value="${r.servings || 4}" min="1" />
+          <label for="f-servings">Servings</label>
+          <input type="number" id="f-servings" value="${r.servings || 4}" min="1" inputmode="numeric" />
         </div>
         <div class="form-group">
-          <label>Prep time (mins)</label>
-          <input type="number" id="f-prep" value="${r.prep_mins || 0}" min="0" />
+          <label for="f-prep">Prep time (mins)</label>
+          <input type="number" id="f-prep" value="${r.prep_mins || 0}" min="0" inputmode="numeric" />
         </div>
       </div>
 
       <div class="form-row">
         <div class="form-group">
-          <label>Cook time (mins)</label>
-          <input type="number" id="f-cook" value="${r.cook_mins || 0}" min="0" />
+          <label for="f-cook">Cook time (mins)</label>
+          <input type="number" id="f-cook" value="${r.cook_mins || 0}" min="0" inputmode="numeric" />
         </div>
         <div class="form-group">
           <label>Family rating</label>
@@ -200,8 +184,8 @@ function showRecipeForm(recipe, container) {
       </div>
 
       <div class="form-group">
-        <label>Tags (comma separated)</label>
-        <input type="text" id="f-tags" value="${Array.isArray(r.tags) ? r.tags.join(', ') : (r.tags || '')}"
+        <label for="f-tags">Tags (comma separated)</label>
+        <input type="text" id="f-tags" value="${esc(Array.isArray(r.tags) ? r.tags.join(', ') : (r.tags || ''))}"
           placeholder="e.g. vegetarian, quick, family-favourite" />
       </div>
 
@@ -211,8 +195,9 @@ function showRecipeForm(recipe, container) {
           <h3>Ingredients</h3>
           <button class="btn btn-outline btn-sm" id="add-ing-btn">${icons.plus} Add</button>
         </div>
+        <p class="text-muted text-sm mb-8">Amounts in metric (g, ml, kg, l). Leave the amount empty for "to taste".</p>
         <div id="ingredients-list">
-          ${(r.ingredients || []).map((ing, i) => ingredientRowHTML(ing, i)).join('')}
+          ${(r.ingredients || []).map(ingredientRowHTML).join('')}
         </div>
       </div>
 
@@ -223,135 +208,160 @@ function showRecipeForm(recipe, container) {
           <button class="btn btn-outline btn-sm" id="add-step-btn">${icons.plus} Add</button>
         </div>
         <div id="steps-list">
-          ${(r.steps || []).map((step, i) => stepRowHTML(step, i)).join('')}
+          ${(r.steps || []).map(stepRowHTML).join('')}
         </div>
       </div>
 
+      ${isEdit && hasGerman ? `
+        <p class="text-muted text-sm">Note: changes to ingredients and steps here don't update the German version.</p>
+      ` : ''}
+
       <div class="form-group">
-        <label>Notes & Tips</label>
-        <textarea id="f-notes" rows="3" placeholder="Any tips, variations, or notes…">${esc(r.notes || '')}</textarea>
+        <label for="f-notes">Notes & Tips</label>
+        <textarea id="f-notes" rows="3" placeholder="Any tips, variations, or notes…">${esc(r.notes)}</textarea>
       </div>
 
       <div class="flex gap-12" style="flex-wrap:wrap;">
         <button class="btn btn-primary btn-lg" id="save-btn" style="flex:1;">
-          ${isEdit ? `${icons.check} Save Changes` : `${icons.check} Save Recipe`}
+          ${icons.check} ${isEdit ? 'Save Changes' : 'Save Recipe'}
         </button>
         <button class="btn btn-ghost" id="cancel-btn">Cancel</button>
       </div>
     </div>
   `;
 
-  // Star rating interaction
-  let currentRating = r.rating || 0;
-  const starContainer = document.getElementById('star-rating');
-  if (starContainer) {
-    starContainer.style.cssText = 'display:flex;gap:4px;margin-top:4px;';
-    starContainer.querySelectorAll('.star').forEach(star => {
-      star.addEventListener('click', () => {
-        currentRating = parseInt(star.dataset.val);
-        starContainer.querySelectorAll('.star').forEach((s, i) => {
-          s.className = `star ${i < currentRating ? 'filled' : 'empty'}`;
-        });
+  const form = formArea.querySelector('#recipe-form');
+  // Keep the draft in sync with what's typed, so a re-render restores it.
+  const syncDraft = () => { draft.recipe = collectForm(form, draft.recipe); };
+  form.addEventListener('input', syncDraft);
+  form.addEventListener('change', syncDraft);
+
+  // Star rating
+  const starContainer = form.querySelector('#star-rating');
+  starContainer.style.cssText = 'display:flex;gap:4px;margin-top:4px;';
+  starContainer.querySelectorAll('.star').forEach(star => {
+    star.addEventListener('click', () => {
+      const rating = parseInt(star.dataset.val);
+      draft.recipe.rating = draft.recipe.rating === rating ? 0 : rating; // tap again to clear
+      starContainer.querySelectorAll('.star').forEach((s, i) => {
+        s.className = `star ${i < draft.recipe.rating ? 'filled' : 'empty'}`;
       });
     });
-  }
-
-  // Add ingredient
-  document.getElementById('add-ing-btn').addEventListener('click', () => {
-    const list = document.getElementById('ingredients-list');
-    const idx = list.children.length;
-    const div = document.createElement('div');
-    div.innerHTML = ingredientRowHTML({ name: '', amount: '', unit: '', notes: '' }, idx);
-    list.appendChild(div.firstElementChild);
   });
 
-  // Add step
-  document.getElementById('add-step-btn').addEventListener('click', () => {
-    const list = document.getElementById('steps-list');
-    const idx = list.children.length;
-    const div = document.createElement('div');
-    div.innerHTML = stepRowHTML('', idx);
-    list.appendChild(div.firstElementChild);
+  // Add rows
+  form.querySelector('#add-ing-btn').addEventListener('click', () => {
+    const list = form.querySelector('#ingredients-list');
+    list.insertAdjacentHTML('beforeend', ingredientRowHTML({}));
+    list.lastElementChild.querySelector('.ing-name').focus();
+    syncDraft();
+  });
+  form.querySelector('#add-step-btn').addEventListener('click', () => {
+    const list = form.querySelector('#steps-list');
+    list.insertAdjacentHTML('beforeend', stepRowHTML('', list.children.length));
+    list.lastElementChild.querySelector('textarea').focus();
+    syncDraft();
   });
 
-  // Delete buttons (delegated)
-  document.getElementById('ingredients-list').addEventListener('click', e => {
-    if (e.target.closest('.del-ing')) e.target.closest('.ing-row').remove();
+  // Delete rows (delegated)
+  form.querySelector('#ingredients-list').addEventListener('click', e => {
+    if (e.target.closest('.del-ing')) { e.target.closest('.ing-row').remove(); syncDraft(); }
   });
-  document.getElementById('steps-list').addEventListener('click', e => {
-    if (e.target.closest('.del-step')) e.target.closest('.step-row').remove();
+  form.querySelector('#steps-list').addEventListener('click', e => {
+    if (e.target.closest('.del-step')) {
+      e.target.closest('.step-row').remove();
+      form.querySelectorAll('.step-num').forEach((n, i) => { n.textContent = i + 1; });
+      syncDraft();
+    }
   });
 
-  // Cancel
-  document.getElementById('cancel-btn').addEventListener('click', () => state.navigate('recipes'));
+  form.querySelector('#cancel-btn').addEventListener('click', () => {
+    const wasEdit = draft.isEdit;
+    const id = draft.recipe.id;
+    draft = null;
+    if (wasEdit) state.navigate('detail', id);
+    else rerender();
+  });
 
-  // Save
-  document.getElementById('save-btn').addEventListener('click', async () => {
-    const btn = document.getElementById('save-btn');
+  form.querySelector('#save-btn').addEventListener('click', async () => {
+    const btn = form.querySelector('#save-btn');
+    const recipe = collectForm(form, draft.recipe);
+    if (!recipe.title && !recipe.title_de) {
+      toast('Please give the recipe a title', 'error');
+      form.querySelector('#f-title').focus();
+      return;
+    }
+    const isEditNow = draft.isEdit;
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Saving…';
 
     try {
-      const saved = collectForm(recipe, currentRating);
-      await appendRecipe(saved);
+      if (isEditNow) await updateRecipe(recipe);
+      else await appendRecipe(recipe);
+      draft = null;
       await loadRecipes();
-      toast('Recipe saved! 🎉', 'success');
-      state.navigate('detail', saved.id);
+      toast(isEditNow ? 'Changes saved ✓' : 'Recipe saved! 🎉', 'success');
+      state.navigate('detail', recipe.id);
     } catch (err) {
       toast('Save failed: ' + err.message, 'error');
       btn.disabled = false;
-      btn.textContent = 'Save Recipe';
+      btn.innerHTML = `${icons.check} ${isEditNow ? 'Save Changes' : 'Save Recipe'}`;
     }
   });
 }
 
-function collectForm(existing, rating) {
-  const tags = document.getElementById('f-tags')?.value.split(',').map(t => t.trim()).filter(Boolean) || [];
+function collectForm(form, existing) {
+  const val = sel => form.querySelector(sel)?.value?.trim() || '';
+  const tags = val('#f-tags').split(',').map(t => t.trim()).filter(Boolean);
+
   const ingredients = [];
-  document.querySelectorAll('.ing-row').forEach(row => {
-    const name = row.querySelector('.ing-name')?.value?.trim();
+  form.querySelectorAll('.ing-row').forEach(row => {
+    const name = row.querySelector('.ing-name').value.trim();
     if (!name) return;
     ingredients.push({
       name,
-      amount: parseFloat(row.querySelector('.ing-amount-val')?.value) || 0,
-      unit: row.querySelector('.ing-unit')?.value?.trim() || '',
-      notes: row.querySelector('.ing-notes')?.value?.trim() || '',
+      amount: parseFloat(String(row.querySelector('.ing-amount-val').value).replace(',', '.')) || 0,
+      unit: row.querySelector('.ing-unit').value.trim(),
+      notes: row.querySelector('.ing-notes').value.trim(),
     });
   });
+
   const steps = [];
-  document.querySelectorAll('.step-row textarea').forEach(ta => {
+  form.querySelectorAll('.step-row textarea').forEach(ta => {
     const s = ta.value.trim();
     if (s) steps.push(s);
   });
 
   return {
-    id: existing?.id || crypto.randomUUID(),
-    title: document.getElementById('f-title')?.value?.trim() || '',
-    title_de: document.getElementById('f-title-de')?.value?.trim() || '',
-    category: document.getElementById('f-category')?.value || '',
-    language: document.getElementById('f-language')?.value || 'en',
-    servings: parseInt(document.getElementById('f-servings')?.value) || 4,
-    prep_mins: parseInt(document.getElementById('f-prep')?.value) || 0,
-    cook_mins: parseInt(document.getElementById('f-cook')?.value) || 0,
-    rating,
+    ...existing,
+    title: val('#f-title'),
+    title_de: val('#f-title-de'),
+    category: val('#f-category'),
+    language: val('#f-language') || 'en',
+    servings: parseInt(val('#f-servings')) || 4,
+    prep_mins: parseInt(val('#f-prep')) || 0,
+    cook_mins: parseInt(val('#f-cook')) || 0,
+    rating: existing.rating || 0,
     tags,
     ingredients,
     steps,
-    notes: document.getElementById('f-notes')?.value?.trim() || '',
-    image_url: existing?.image_url || '',
-    created_at: existing?.created_at || new Date().toISOString(),
-    ingredients_de: existing?.ingredients_de || [],
-    steps_de: existing?.steps_de || [],    
+    notes: val('#f-notes'),
+    image_url: existing.image_url || '',
+    created_at: existing.created_at || new Date().toISOString(),
+    ingredients_de: existing.ingredients_de || [],
+    steps_de: existing.steps_de || [],
   };
 }
 
-function ingredientRowHTML(ing, i) {
+function ingredientRowHTML(ing) {
   return `
-    <div class="ing-row" style="display:grid;grid-template-columns:1fr 80px 70px auto;gap:6px;margin-bottom:6px;align-items:center;">
-      <input class="ing-name" type="text" value="${esc(ing.name || '')}" placeholder="Ingredient" />
-      <input class="ing-amount-val" type="number" value="${ing.amount || ''}" placeholder="Amt" step="any" min="0" />
-      <input class="ing-unit" type="text" value="${esc(ing.unit || '')}" placeholder="Unit" />
-      <button class="btn btn-ghost btn-icon del-ing" title="Remove" style="color:var(--rust);">${icons.trash}</button>
+    <div class="ing-row" style="display:grid;grid-template-columns:1fr 72px 64px auto;gap:6px;margin-bottom:10px;align-items:center;">
+      <input class="ing-name" type="text" value="${esc(ing.name)}" placeholder="Ingredient" aria-label="Ingredient" />
+      <input class="ing-amount-val" type="text" inputmode="decimal" value="${ing.amount ? esc(ing.amount) : ''}" placeholder="Amt" aria-label="Amount" />
+      <input class="ing-unit" type="text" value="${esc(ing.unit)}" placeholder="Unit" aria-label="Unit" />
+      <button class="btn btn-ghost btn-icon del-ing" title="Remove" aria-label="Remove ingredient" style="color:var(--rust);">${icons.trash}</button>
+      <input class="ing-notes" type="text" value="${esc(ing.notes)}" placeholder="Note, e.g. finely chopped (optional)"
+        aria-label="Note" style="grid-column:1 / 4;font-size:.85rem;padding-top:6px;padding-bottom:6px;" />
     </div>
   `;
 }
@@ -359,11 +369,9 @@ function ingredientRowHTML(ing, i) {
 function stepRowHTML(step, i) {
   return `
     <div class="step-row" style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-start;">
-      <span style="min-width:24px;height:24px;background:var(--forest);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:500;margin-top:10px;flex-shrink:0;">${i+1}</span>
-      <textarea rows="2" style="flex:1;resize:vertical;">${esc(step || '')}</textarea>
-      <button class="btn btn-ghost btn-icon del-step" title="Remove" style="color:var(--rust);margin-top:6px;">${icons.trash}</button>
+      <span class="step-num" style="min-width:24px;height:24px;background:var(--forest);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:500;margin-top:10px;flex-shrink:0;">${i + 1}</span>
+      <textarea rows="2" style="flex:1;resize:vertical;" aria-label="Step ${i + 1}">${esc(step)}</textarea>
+      <button class="btn btn-ghost btn-icon del-step" title="Remove" aria-label="Remove step" style="color:var(--rust);margin-top:6px;">${icons.trash}</button>
     </div>
   `;
 }
-
-function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }

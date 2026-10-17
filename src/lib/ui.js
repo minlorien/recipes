@@ -1,11 +1,28 @@
 // ── Toast notifications ────────────────────────────────────────────────────
-export function toast(message, type = '', duration = 3000) {
-  const container = document.getElementById('toast-container');
+// The container lives on <body>, outside #app, so page re-renders don't wipe toasts.
+export function toast(message, type = '', duration = 3500) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+  }
   const el = document.createElement('div');
   el.className = `toast${type ? ' ' + type : ''}`;
   el.textContent = message;
   container.appendChild(el);
-  setTimeout(() => el.remove(), duration);
+  setTimeout(() => el.remove(), type === 'error' ? Math.max(duration, 6000) : duration);
+}
+
+// ── HTML escaping ──────────────────────────────────────────────────────────
+// Use for every piece of recipe/AI text put into innerHTML.
+export function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ── Stars renderer ─────────────────────────────────────────────────────────
@@ -59,11 +76,6 @@ export const icons = {
   spark: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>`,
 };
 
-// ── Confirm dialog ─────────────────────────────────────────────────────────
-export function confirm(message) {
-  return window.confirm(message);
-}
-
 // ── File to base64 ─────────────────────────────────────────────────────────
 export function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -93,7 +105,10 @@ export function fileToBase64(file) {
       const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       resolve(dataUrl.split(',')[1]);
     };
-    img.onerror = reject;
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('This photo format could not be opened. Please take the photo again or choose a JPEG.'));
+    };
     img.src = url;
   });
 }

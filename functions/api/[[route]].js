@@ -6,122 +6,137 @@
  *   POST /api/login         → verify password, return session token
  *   POST /api/ai            → Anthropic API (requires token)
  *   POST /api/sheets/read   → Google Sheets read (requires token)
- *   POST /api/sheets/write  → Google Sheets write (requires token)
+ *   POST /api/sheets/write  → Google Sheets append / update-by-id (requires token)
  *   POST /api/sheets/delete → Google Sheets delete row (requires token)
+ *
+ * Env: ANTHROPIC_API_KEY, SHEETS_ID, GOOGLE_SERVICE_ACCOUNT_JSON, APP_PASSWORD,
+ *      SESSION_SECRET (recommended; falls back to a value derived from APP_PASSWORD).
+ * The app is same-origin, so no CORS headers are sent.
  */
 
 const TOKEN_HEADER = 'x-session-token';
+const SESSION_DAYS = 30;
 
 export async function onRequest(context) {
   const { request, env } = context;
 
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': `Content-Type, ${TOKEN_HEADER}`,
-  };
-
-  if (request.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+  if (request.method !== 'POST') {
+    return json({ error: 'Method not allowed' }, 405);
   }
 
-  const url = new URL(request.url);
-  const path = url.pathname;
+  const path = new URL(request.url).pathname;
 
   try {
-    let response;
+    if (path === '/api/login') return await handleLogin(request, env);
 
-    if (path === '/api/login') {
-      response = await handleLogin(request, env);
-    } else {
-      // All other routes require a valid session token
-      const token = request.headers.get(TOKEN_HEADER);
-      if (!await verifyToken(token, env)) {
-        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      if (path === '/api/ai') {
-        response = await handleAI(request, env);
-      } else if (path === '/api/sheets/read') {
-        response = await handleSheetsRead(request, env);
-      } else if (path === '/api/sheets/write') {
-        response = await handleSheetsWrite(request, env);
-      } else if (path === '/api/sheets/delete') {
-        response = await handleSheetsDelete(request, env);
-      } else {
-        response = new Response(JSON.stringify({ error: 'Not found' }), { status: 404 });
-      }
+    // All other routes require a valid session token
+    if (!await verifyToken(request.headers.get(TOKEN_HEADER), env)) {
+      return json({ error: 'Unauthorized' }, 401);
     }
 
-    const newHeaders = new Headers(response.headers);
-    Object.entries(corsHeaders).forEach(([k, v]) => newHeaders.set(k, v));
-    return new Response(response.body, { status: response.status, headers: newHeaders });
-
+    switch (path) {
+      case '/api/ai':           return await handleAI(request, env);
+      case '/api/sheets/read':  return await handleSheetsRead(request, env);
+      case '/api/sheets/write': return await handleSheetsWrite(request, env);
+      case '/api/sheets/delete': return await handleSheetsDelete(request, env);
+      default:                  return json({ error: 'Not found' }, 404);
+    }
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    console.error('Unhandled error', path, err?.stack || err);
+    return json({ error: err.message || 'Server error' }, 500);
   }
 }
 
-// ── Login ──────────────────────────────────────────────────────────────────
-async function handleLogin(request, env) {
-  const { password } = await request.json();
+// Upstream (Anthropic/Google) auth failures mean OUR key is wrong, not the user's
+// session — don't pass them on as 401, which would log the user out.
+function upstreamStatus(status) {
+  return status === 401 || status === 403 ? 502 : status;
+}
 
-  if (password !== env.APP_PASSWORD) {
-    return new Response(JSON.stringify({ error: 'Invalid password' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  // Generate a simple signed token using HMAC
-  const token = await generateToken(env);
-  return new Response(JSON.stringify({ token }), {
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
     headers: { 'Content-Type': 'application/json' },
   });
 }
 
-async function generateToken(env) {
-  const secret = env.APP_PASSWORD + '_session_secret';
-  const data = 'authenticated_' + Math.floor(Date.now() / (1000 * 60 * 60 * 24)); // changes daily
-  const key = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+// ── Login & session tokens ─────────────────────────────────────────────────
+// Token = base64url(payload) + "." + base64url(HMAC-SHA256(payload)),
+// payload = {"exp": <unix seconds>}. Valid until exp, across midnight.
+async function handleLogin(request, env) {
+  const { password } = await request.json().catch(() => ({}));
+
+  if (!env.APP_PASSWORD || !await safeEqual(String(password ?? ''), env.APP_PASSWORD, env)) {
+    await new Promise(r => setTimeout(r, 500)); // slow down guessing
+    return json({ error: 'Invalid password' }, 401);
+  }
+
+  const exp = Math.floor(Date.now() / 1000) + SESSION_DAYS * 24 * 3600;
+  const payload = b64url(new TextEncoder().encode(JSON.stringify({ exp })));
+  const sig = b64url(await hmac(env, payload));
+  return json({ token: `${payload}.${sig}` });
 }
 
 async function verifyToken(token, env) {
-  if (!token) return false;
+  if (!token || typeof token !== 'string') return false;
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return false;
   try {
-    // Check today's and yesterday's token (handles midnight edge case)
-    const valid = await generateToken(env);
-    return token === valid;
+    const key = await hmacKey(env, ['verify']);
+    const ok = await crypto.subtle.verify('HMAC', key, fromB64url(sig), new TextEncoder().encode(payload));
+    if (!ok) return false;
+    const { exp } = JSON.parse(new TextDecoder().decode(fromB64url(payload)));
+    return typeof exp === 'number' && exp > Date.now() / 1000;
   } catch {
     return false;
   }
 }
 
+function sessionSecret(env) {
+  return env.SESSION_SECRET || `${env.APP_PASSWORD}_session_secret`;
+}
+
+function hmacKey(env, usages) {
+  return crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(sessionSecret(env)),
+    { name: 'HMAC', hash: 'SHA-256' }, false, usages
+  );
+}
+
+async function hmac(env, data) {
+  const key = await hmacKey(env, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data)));
+}
+
+// Constant-time comparison: compare HMACs of both values, byte by byte.
+async function safeEqual(a, b, env) {
+  const [x, y] = await Promise.all([hmac(env, a), hmac(env, b)]);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
+function b64url(bytes) {
+  return btoa(String.fromCharCode(...bytes)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function fromB64url(str) {
+  const b64 = str.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((str.length + 3) % 4);
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+}
+
 // ── Anthropic API proxy ────────────────────────────────────────────────────
-// Model and limits are fixed here; the client only supplies system/messages/max_tokens.
+// Model and limits are fixed here; the client only supplies system/messages/
+// max_tokens and optionally a JSON schema for the answer.
 // Swapping models is a one-line change to AI_MODEL.
 const AI_MODEL = 'claude-sonnet-5-5';
 const AI_MAX_TOKENS = 8000;    // hard ceiling; thinking counts toward this too
 const AI_DEFAULT_TOKENS = 2000;
 
 async function handleAI(request, env) {
-  const { system, messages, max_tokens } = await request.json();
+  const { system, messages, max_tokens, schema } = await request.json();
   if (!Array.isArray(messages) || messages.length === 0) {
-    return new Response(JSON.stringify({ error: { message: 'messages required' } }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: { message: 'messages required' } }, 400);
   }
   fixImageTypes(messages);
   const requested = Number.isInteger(max_tokens) ? max_tokens : AI_DEFAULT_TOKENS;
@@ -135,6 +150,10 @@ async function handleAI(request, env) {
     messages,
   };
   if (system) body.system = system;
+  // Structured outputs: the answer is guaranteed to be valid JSON matching the schema.
+  if (schema && typeof schema === 'object') {
+    body.output_config.format = { type: 'json_schema', schema };
+  }
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -146,7 +165,7 @@ async function handleAI(request, env) {
     },
     body: JSON.stringify(body),
   });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({ error: { message: `AI service error (${res.status})` } }));
   if (!res.ok) {
     console.error('Anthropic error', res.status, JSON.stringify(data.error || data));
   } else if (data.stop_reason !== 'end_turn') {
@@ -157,10 +176,7 @@ async function handleAI(request, env) {
   if (Array.isArray(data.content)) {
     data.content = data.content.filter(b => b.type === 'text');
   }
-  return new Response(JSON.stringify(data), {
-    status: res.status,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return json(data, upstreamStatus(res.status));
 }
 
 // The app re-encodes photos as JPEG, but older versions labelled them with the
@@ -178,45 +194,63 @@ function fixImageTypes(messages) {
   }
 }
 
-// ── Google Sheets read ─────────────────────────────────────────────────────
+// ── Google Sheets ──────────────────────────────────────────────────────────
+// Reads and writes both use the service account, so the sheet can be private.
+const SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
+
+async function sheetsFetch(env, path, init = {}) {
+  const token = await getServiceAccountToken(env);
+  const res = await fetch(`${SHEETS_BASE}/${env.SHEETS_ID}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) console.error('Sheets error', res.status, path, JSON.stringify(data.error || data));
+  return { res, data, status: upstreamStatus(res.status) };
+}
+
 async function handleSheetsRead(request, env) {
   const { range } = await request.json();
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${env.SHEETS_ID}/values/${range}?key=${env.SHEETS_API_KEY}`;
-  const res = await fetch(url);
-  const data = await res.json();
-  return new Response(JSON.stringify(data), {
-    status: res.status,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  const { data, status } = await sheetsFetch(env, `/values/${encodeURIComponent(range)}`);
+  return json(data, status);
 }
 
-// ── Google Sheets write ────────────────────────────────────────────────────
+// mode 'append': add rows at the end.
+// mode 'update': find the row whose column A equals `id` and overwrite it.
+//   (Looking the row up here, rather than trusting a row number from the phone,
+//   means an edit can never overwrite the wrong recipe.)
 async function handleSheetsWrite(request, env) {
-  const { range, values, mode } = await request.json();
-  const token = await getServiceAccountToken(env);
-  const url = mode === 'append'
-    ? `https://sheets.googleapis.com/v4/spreadsheets/${env.SHEETS_ID}/values/${range}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`
-    : `https://sheets.googleapis.com/v4/spreadsheets/${env.SHEETS_ID}/values/${range}?valueInputOption=RAW`;
-  const res = await fetch(url, {
-    method: mode === 'append' ? 'POST' : 'PUT',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-    body: JSON.stringify({ values }),
-  });
-  const data = await res.json();
-  return new Response(JSON.stringify(data), {
-    status: res.status,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  const { range, values, mode, id } = await request.json();
+  const body = JSON.stringify({ values });
+
+  if (mode === 'append') {
+    const { data, status } = await sheetsFetch(env,
+      `/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+      { method: 'POST', body });
+    return json(data, status);
+  }
+
+  if (mode === 'update') {
+    if (!id) return json({ error: 'id required' }, 400);
+    const sheet = String(range).split('!')[0];
+    const ids = await sheetsFetch(env, `/values/${encodeURIComponent(`${sheet}!A:A`)}`);
+    if (!ids.res.ok) return json(ids.data, ids.status);
+    const index = (ids.data.values || []).findIndex(row => row[0] === id);
+    if (index < 1) return json({ error: 'Recipe not found in the sheet — refresh and try again' }, 404);
+    const row = index + 1;
+    const { data, status } = await sheetsFetch(env,
+      `/values/${encodeURIComponent(`${sheet}!A${row}:R${row}`)}?valueInputOption=RAW`,
+      { method: 'PUT', body });
+    return json(data, status);
+  }
+
+  return json({ error: 'Unknown mode' }, 400);
 }
 
-// ── Google Sheets delete ───────────────────────────────────────────────────
 async function handleSheetsDelete(request, env) {
   const { rowIndex } = await request.json();
-  const token = await getServiceAccountToken(env);
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${env.SHEETS_ID}:batchUpdate`;
-  const res = await fetch(url, {
+  const { data, status } = await sheetsFetch(env, ':batchUpdate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: JSON.stringify({
       requests: [{
         deleteDimension: {
@@ -225,17 +259,18 @@ async function handleSheetsDelete(request, env) {
       }]
     }),
   });
-  const data = await res.json();
-  return new Response(JSON.stringify(data), {
-    status: res.status,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return json(data, status);
 }
 
 // ── Service account JWT ────────────────────────────────────────────────────
+// Access tokens last an hour; reuse one while this worker instance is alive.
+let cachedToken = null; // { token, exp }
+
 async function getServiceAccountToken(env) {
-  const sa = JSON.parse(env.GOOGLE_SERVICE_ACCOUNT_JSON);
   const now = Math.floor(Date.now() / 1000);
+  if (cachedToken && cachedToken.exp - 300 > now) return cachedToken.token;
+
+  const sa = JSON.parse(env.GOOGLE_SERVICE_ACCOUNT_JSON);
   const header = { alg: 'RS256', typ: 'JWT' };
   const claim = {
     iss: sa.client_email,
@@ -244,7 +279,7 @@ async function getServiceAccountToken(env) {
     exp: now + 3600,
     iat: now,
   };
-  const encode = obj => btoa(JSON.stringify(obj)).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+  const encode = obj => b64url(new TextEncoder().encode(JSON.stringify(obj)));
   const unsigned = `${encode(header)}.${encode(claim)}`;
   const pemContents = sa.private_key
     .replace(/-----BEGIN RSA PRIVATE KEY-----|-----END RSA PRIVATE KEY-----/g, '')
@@ -256,14 +291,14 @@ async function getServiceAccountToken(env) {
     { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']
   );
   const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', cryptoKey, new TextEncoder().encode(unsigned));
-  const sigStr = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
-  const jwt = `${unsigned}.${sigStr}`;
+  const jwt = `${unsigned}.${b64url(new Uint8Array(sig))}`;
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
   });
   const data = await res.json();
-  if (!data.access_token) throw new Error('Failed to get access token');
-  return data.access_token;
+  if (!data.access_token) throw new Error('Failed to get Google access token');
+  cachedToken = { token: data.access_token, exp: now + (data.expires_in || 3600) };
+  return cachedToken.token;
 }

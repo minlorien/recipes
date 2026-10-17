@@ -1,7 +1,23 @@
 import { fetchRecipes } from './sheets.js';
+import { getToken, setToken } from './api.js';
+
+// localStorage can be unavailable or hold corrupted data; never let that break startup.
+function load(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function save(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
 
 class State {
   constructor() {
+    const lang = load('displayLang', 'en');
     this._data = {
       authenticated: false,
       recipes: [],
@@ -12,9 +28,10 @@ class State {
       searchQuery: '',
       filterCategory: '',
       filterRating: 0,
-      displayLang: localStorage.getItem('displayLang') || 'en',
-      shoppingList: JSON.parse(localStorage.getItem('shoppingList') || '[]'),
-      shoppingServings: JSON.parse(localStorage.getItem('shoppingServings') || '{}'),
+      displayLang: lang === 'de' ? 'de' : 'en',
+      shoppingList: asArray(load('shoppingList', [])),
+      shoppingServings: asObject(load('shoppingServings', {})),
+      shoppingChecked: asObject(load('shoppingChecked', {})),
     };
     this._listeners = new Set();
   }
@@ -26,35 +43,58 @@ class State {
     this._notify();
   }
 
+  // Update without re-rendering (e.g. while typing in the search box).
+  setQuiet(updates) {
+    Object.assign(this._data, updates);
+  }
+
   _notify() { this._listeners.forEach(fn => fn(this._data)); }
   subscribe(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); }
 
   toggleLang() {
     const next = this._data.displayLang === 'en' ? 'de' : 'en';
-    this._data.displayLang = next;
-    localStorage.setItem('displayLang', next);
-    this._notify();
+    save('displayLang', next);
+    this.set({ displayLang: next });
   }
 
   addToShopping(recipeId) {
     const list = this._data.shoppingList;
     if (!list.includes(recipeId)) {
       const updated = [...list, recipeId];
+      save('shoppingList', updated);
       this.set({ shoppingList: updated });
-      localStorage.setItem('shoppingList', JSON.stringify(updated));
     }
   }
 
   removeFromShopping(recipeId) {
     const updated = this._data.shoppingList.filter(id => id !== recipeId);
+    save('shoppingList', updated);
     this.set({ shoppingList: updated });
-    localStorage.setItem('shoppingList', JSON.stringify(updated));
+  }
+
+  clearShopping() {
+    save('shoppingList', []);
+    save('shoppingChecked', {});
+    this.set({ shoppingList: [], shoppingChecked: {} });
+  }
+
+  // Ticked-off items survive closing the app (handy in the supermarket).
+  setChecked(key, checked) {
+    const updated = { ...this._data.shoppingChecked, [key]: checked };
+    if (!checked) delete updated[key];
+    save('shoppingChecked', updated);
+    this.setQuiet({ shoppingChecked: updated });
+  }
+
+  clearChecked() {
+    save('shoppingChecked', {});
+    this.set({ shoppingChecked: {} });
   }
 
   setServings(recipeId, servings) {
     const updated = { ...this._data.shoppingServings, [recipeId]: servings };
+    save('shoppingServings', updated);
     this.set({ shoppingServings: updated });
-    localStorage.setItem('shoppingServings', JSON.stringify(updated));
   }
 
   getServings(recipeId) {
@@ -73,6 +113,7 @@ class State {
         r.title_de?.toLowerCase().includes(q) ||
         r.tags?.some(t => t.toLowerCase().includes(q)) ||
         r.ingredients?.some(i => i.name?.toLowerCase().includes(q)) ||
+        r.ingredients_de?.some(i => i.name?.toLowerCase().includes(q)) ||
         r.category?.toLowerCase().includes(q)
       );
     }
@@ -97,17 +138,17 @@ class State {
   }
 }
 
+function asArray(v) { return Array.isArray(v) ? v : []; }
+function asObject(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+
 export const state = new State();
 
-// ── Session token (stored in sessionStorage, never the password) ───────────
-export function getToken() {
-  return sessionStorage.getItem('session_token');
-}
-
+// ── Session (the token is stored, never the password) ──────────────────────
 export function checkAuth() {
   return !!getToken();
 }
 
+// Resolves to 'ok', 'wrong-password' or 'offline'.
 export async function login(password) {
   try {
     const res = await fetch('/api/login', {
@@ -115,29 +156,33 @@ export async function login(password) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password }),
     });
-    if (!res.ok) return false;
+    if (res.status === 401) return 'wrong-password';
+    if (!res.ok) return 'offline';
     const { token } = await res.json();
-    sessionStorage.setItem('session_token', token);
+    setToken(token);
     state.set({ authenticated: true });
     loadRecipes();
-    return true;
+    return 'ok';
   } catch {
-    return false;
+    return 'offline';
   }
 }
 
 export function logout() {
-  sessionStorage.removeItem('session_token');
-  state.set({ authenticated: false, recipes: [] });
+  setToken(null);
+  state.set({ authenticated: false, recipes: [], currentPage: 'recipes', currentRecipeId: null });
 }
 
+// Resolves to true on success, false on failure (the error is shown on the recipes page).
 export async function loadRecipes() {
   state.set({ loading: true, error: null });
   try {
     const recipes = await fetchRecipes();
     state.set({ recipes, loading: false });
+    return true;
   } catch (err) {
     console.error(err);
     state.set({ loading: false, error: err.message });
+    return false;
   }
 }
